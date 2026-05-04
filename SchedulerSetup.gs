@@ -180,6 +180,9 @@ function onOpen() {
   groupNames.forEach((name, i) => {
     // Each group gets its own menu function via a dispatcher
     groupMenu.addItem(name, "filterGroup_" + i);
+    if (name === "General Announcement") {
+      groupMenu.addSeparator();
+    }
   });
   groupMenu.addSeparator();
   groupMenu.addItem("👁 Show All Roles", "showAllRoles");
@@ -1011,9 +1014,8 @@ function applyFormatting() {
 
   const groupNames = getGroupNames_();
   groupNames.forEach(gName => {
-    // "All Roles" contradicts group-based checking, skip it.
-    if (gName === "All Roles") return;
-
+    // "All Roles" and "General Announcement" contradict specific group-based checking, skip them.
+    if (gName === "All Roles" || gName === "General Announcement") return;
     const roles = getGroupRoles_(gName);
     const rows = [];
     roles.forEach(role => {
