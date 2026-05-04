@@ -974,41 +974,88 @@ function applyFormatting() {
 
   const dataRange = sheet.getRange(3, 2, numRows - 2, numCols - 1);
 
-  // Severity 3: 3+ bookings on the same day — PASTEL RED + black text
-  const conflict3Rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(B3<>"", COUNTIF(B$3:B$' + (numRows) + ',B3)>=3)')
-    .setBackground("#ffcdd2")
-    .setFontColor("#000000")
-    .setBold(false)
-    .setRanges([dataRange])
-    .build();
+  const isConf3 = 'COUNTIF(B$3:B$' + numRows + ',B3)>=3';
+  const isConf2 = 'COUNTIF(B$3:B$' + numRows + ',B3)>=2';
 
-  // Severity 2: double-booked (2 on same day) — PASTEL ORANGE + black text
-  const conflict2Rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(B3<>"", COUNTIF(B$3:B$' + (numRows) + ',B3)>=2)')
-    .setBackground("#ffe0b2")
-    .setFontColor("#000000")
-    .setBold(false)
-    .setRanges([dataRange])
-    .build();
+  // Base general rules
+  const conf3Rule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND(B3<>"", ' + isConf3 + ')')
+    .setBackground("#ffcdd2").setFontColor("#000000").setBold(false).setRanges([dataRange]).build();
 
-  // Base: empty cells — light yellow
-  const emptyRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenCellEmpty()
-    .setBackground("#fff9c4")
-    .setRanges([dataRange])
-    .build();
+  const conf2Rule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=AND(B3<>"", ' + isConf2 + ')')
+    .setBackground("#ffe0b2").setFontColor("#000000").setBold(false).setRanges([dataRange]).build();
 
-  // Base: assigned (no conflict) — light green
   const filledRule = SpreadsheetApp.newConditionalFormatRule()
     .whenCellNotEmpty()
-    .setBackground("#c8e6c9")
-    .setRanges([dataRange])
-    .build();
+    .setBackground("#c8e6c9").setFontColor("#000000").setBold(false).setRanges([dataRange]).build();
+
+  const emptyRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenCellEmpty()
+    .setBackground("#fff9c4").setRanges([dataRange]).build();
+
+  // Dynamic Fatigue Warning rules per Role Group
+  const rulesConf3Consec = [];
+  const rulesConf2Consec = [];
+  const rulesConsec = [];
+
+  const sData = sheet.getDataRange().getValues();
+  const roleToRow = {};
+  for (let r = 2; r < sData.length; r++) {
+    const role = sData[r][0];
+    if (role && typeof role === "string" && role.trim() !== "") {
+      roleToRow[role.trim()] = r + 1; // 1-based sheet row index
+    }
+  }
+
+  const groupNames = getGroupNames_();
+  groupNames.forEach(gName => {
+    // "All Roles" contradicts group-based checking, skip it.
+    if (gName === "All Roles") return;
+
+    const roles = getGroupRoles_(gName);
+    const rows = [];
+    roles.forEach(role => {
+      if (roleToRow[role]) rows.push(roleToRow[role]);
+    });
+
+    if (rows.length === 0) return;
+
+    const topLeftCell = "B" + rows[0];
+    const ranges = rows.map(r => sheet.getRange(r, 2, 1, numCols - 1));
+
+    const fLeft2 = "IF(COLUMN()>3, OR(" + rows.map(r => `INDEX($A$1:$ZZ, ${r}, COLUMN()-2)=${topLeftCell}`).join(",") + "), FALSE)";
+    const fLeft1 = "IF(COLUMN()>2, OR(" + rows.map(r => `INDEX($A$1:$ZZ, ${r}, COLUMN()-1)=${topLeftCell}`).join(",") + "), FALSE)";
+    const fRight1 = "OR(" + rows.map(r => `INDEX($A$1:$ZZ, ${r}, COLUMN()+1)=${topLeftCell}`).join(",") + ")";
+    const fRight2 = "OR(" + rows.map(r => `INDEX($A$1:$ZZ, ${r}, COLUMN()+2)=${topLeftCell}`).join(",") + ")";
+    const isConsecutive = `OR(AND(${fLeft2},${fLeft1}), AND(${fLeft1},${fRight1}), AND(${fRight1},${fRight2}))`;
+
+    const gConf3 = `COUNTIF(B$3:B$${numRows},${topLeftCell})>=3`;
+    const gConf2 = `COUNTIF(B$3:B$${numRows},${topLeftCell})>=2`;
+
+    rulesConf3Consec.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(`=AND(${topLeftCell}<>"", ${gConf3}, ${isConsecutive})`)
+        .setBackground("#ffcdd2").setFontColor("#d32f2f").setBold(false).setRanges(ranges).build()
+    );
+    rulesConf2Consec.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(`=AND(${topLeftCell}<>"", ${gConf2}, ${isConsecutive})`)
+        .setBackground("#ffe0b2").setFontColor("#d32f2f").setBold(false).setRanges(ranges).build()
+    );
+    rulesConsec.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(`=AND(${topLeftCell}<>"", ${isConsecutive})`)
+        .setBackground("#c8e6c9").setFontColor("#d32f2f").setBold(false).setRanges(ranges).build()
+    );
+  });
 
   // Order matters! First matching rule wins.
-  // conflict3 → conflict2 → empty → filled
-  sheet.setConditionalFormatRules([conflict3Rule, conflict2Rule, emptyRule, filledRule]);
+  sheet.setConditionalFormatRules([
+    ...rulesConf3Consec, conf3Rule, 
+    ...rulesConf2Consec, conf2Rule, 
+    ...rulesConsec, filledRule, emptyRule
+  ]);
 
   ss.toast("Formatting applied ✅", "Scheduler", 3);
 }
