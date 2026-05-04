@@ -558,7 +558,7 @@ function buildScheduleSheet_(sheet) {
 
   // Format the date header cells (Row 2)
   const dateRange = sheet.getRange(2, 2, 1, fridays.length);
-  dateRange.setNumberFormat("ddd, MMM d");  // e.g. "Fri, May 8"
+  dateRange.setNumberFormat("MMM d");  // e.g. "May 8"
   dateRange
     .setFontWeight("bold")
     .setBackground("#1a73e8")
@@ -857,7 +857,7 @@ function addMoreWeeks() {
   newFridays.forEach((friday, i) => {
     const col = lastCol + 1 + i;
     sheet.getRange(2, col).setValue(friday)
-      .setNumberFormat("ddd, MMM d")
+      .setNumberFormat("MMM d")
       .setFontWeight("bold")
       .setBackground("#1a73e8")
       .setFontColor("#ffffff")
