@@ -689,9 +689,18 @@ function refreshAllDropdowns() {
   const scheduleData = scheduleSheet.getDataRange().getValues();
   const numCols = scheduleData[0].length;
 
-  // For each role row, set data validation
-  for (let r = 2; r < scheduleData.length; r++) {
-    const role = scheduleData[r][0];
+  // For each role row (starting from top to scrub headers too), set data validation
+  const validRoles = getRoles_();
+  for (let r = 0; r < scheduleData.length; r++) {
+    let role = scheduleData[r][0];
+    if (!role || typeof role !== "string") continue;
+    role = role.trim();
+    if (!validRoles.includes(role)) {
+      // Actively scrub orphaned notes and validations from non-role rows!
+      scheduleSheet.getRange(r + 1, 2, 1, numCols - 1).clearDataValidations().clearNote();
+      continue;
+    }
+
     const eligible = roleToNames[role] || [];
     const range = scheduleSheet.getRange(r + 1, 2, 1, numCols - 1);
 
