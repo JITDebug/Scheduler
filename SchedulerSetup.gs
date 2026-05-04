@@ -710,7 +710,8 @@ function refreshAllDropdowns() {
     const name = row[0];
     for (let c = 1; c < ministersHeader.length; c++) {
       const roleName = ministersHeader[c];
-      if (row[c] === true) {
+      const isAssigned = row[c] === true || String(row[c]).toLowerCase() === "true";
+      if (isAssigned) {
         if (!roleToNames[roleName]) roleToNames[roleName] = [];
         roleToNames[roleName].push(name);
       }
@@ -725,6 +726,7 @@ function refreshAllDropdowns() {
   for (let r = 2; r < scheduleData.length; r++) {
     const role = scheduleData[r][0];
     const eligible = roleToNames[role] || [];
+    const range = scheduleSheet.getRange(r + 1, 2, 1, numCols - 1);
 
     if (eligible.length > 0) {
       const rule = SpreadsheetApp.newDataValidation()
@@ -733,11 +735,10 @@ function refreshAllDropdowns() {
         .build();
 
       // Apply to all date columns in this row
-      const range = scheduleSheet.getRange(r + 1, 2, 1, numCols - 1);
       range.setDataValidation(rule);
+      range.clearNote(); // Important: remove the warning if it existed!
     } else {
       // No eligible ministers — clear validation but add a note
-      const range = scheduleSheet.getRange(r + 1, 2, 1, numCols - 1);
       range.clearDataValidations();
       range.setNote("No minister assigned to this role. Update the Ministers sheet.");
     }
