@@ -607,9 +607,9 @@ function buildScheduleSheet_(sheet) {
     .setHorizontalAlignment("center");
 
   // Format the Monthly Theme row (Row 1)
-  sheet.getRange(1, 1).setFontWeight("bold").setBackground("#fbbc04").setHorizontalAlignment("center");
+  sheet.getRange(1, 1).setFontWeight("bold").setBackground("#e8f0fe").setHorizontalAlignment("center");
   const themeRange = sheet.getRange(1, 2, 1, fridays.length);
-  themeRange.setBackground("#fff2cc").setHorizontalAlignment("center").setVerticalAlignment("middle").setFontWeight("bold");
+  themeRange.setBackground("#e8f0fe").setHorizontalAlignment("center").setVerticalAlignment("middle").setFontWeight("bold");
 
   // Role rows
   roles.forEach(role => {
@@ -895,7 +895,7 @@ function addMoreWeeks() {
       .setBackground("#1a73e8")
       .setFontColor("#ffffff")
       .setHorizontalAlignment("center");
-    sheet.getRange(1, col).setBackground("#fff2cc")
+    sheet.getRange(1, col).setBackground("#e8f0fe")
       .setHorizontalAlignment("center").setVerticalAlignment("middle").setFontWeight("bold");
     sheet.setColumnWidth(col, 130);
   });
