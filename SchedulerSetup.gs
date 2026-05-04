@@ -1057,6 +1057,15 @@ function applyFormatting() {
     ...rulesConsec, filledRule, emptyRule
   ]);
 
+  // Add Color Legend Note to the header cell
+  const legendNote = "🎨 COLOR LEGEND:\n\n" +
+    "🟩 Green BG: Assigned normally (no conflicts).\n" +
+    "🟨 Yellow BG: Role is unfilled.\n" +
+    "🟧 Orange BG: Double-booked (scheduled 2 times on this day).\n" +
+    "🟥 Red BG: Triple-booked (scheduled 3+ times on this day).\n\n" +
+    "🔴 Red Text: Fatigue warning! This person has been scheduled in this same Ministry Group for 3 or more consecutive weeks.";
+  sheet.getRange(2, 1).setNote(legendNote);
+
   ss.toast("Formatting applied ✅", "Scheduler", 3);
 }
 
