@@ -83,7 +83,11 @@ const CONFIG = {
       "Teacher (Kids)",
       "Teacher (Pre-teens)",
       "Co-teacher 1 (Kids)",
-      "Co-teacher 2 (Kids)"
+      "Co-teacher 2 (Kids)",
+      "Communion Server 1",
+      "Communion Server 2",
+      "Communion Server 3",
+      "Communion Server 4"
     ],
     "Pulpit Ministry": [
       "Preacher",
@@ -120,6 +124,26 @@ const CONFIG = {
       "Usher 2",
       "Usher 3",
       "Usher 4"
+    ],
+    "Communion": [
+      "Communion Server 1",
+      "Communion Server 2",
+      "Communion Server 3",
+      "Communion Server 4"
+    ],
+    "General Announcement" : [
+      "Cooking",
+      "Uniform",
+      "Preacher",
+      "Presider",
+      "Worship Leader 1",
+      "Worship Leader 2",
+      "Backup Singer 1",
+      "Backup Singer 2",
+      "Backup Singer 3",
+      "Tithes and Offering",
+      "Projectionist",
+      "Cameraman"
     ],
     "Others": [
       "Uniform",
@@ -361,7 +385,7 @@ function syncRoles() {
 
   // ── Sync Schedule sheet (rows) ──
   const sData = scheduleSheet.getDataRange().getValues();
-  const currentScheduleRoles = sData.slice(1).map(row => row[0]);
+  const currentScheduleRoles = sData.slice(2).map(row => row[0]);
   const numCols = sData[0].length;
 
   // Add new role rows to Schedule
@@ -381,7 +405,7 @@ function syncRoles() {
   if (sRolesToRemove.length > 0) {
     // Re-read after adds
     const updatedData = scheduleSheet.getDataRange().getValues();
-    for (let r = updatedData.length - 1; r >= 1; r--) {
+    for (let r = updatedData.length - 1; r >= 2; r--) {
       if (sRolesToRemove.includes(updatedData[r][0])) {
         scheduleSheet.deleteRow(r + 1);
       }
@@ -555,13 +579,18 @@ function buildScheduleSheet_(sheet) {
   // Generate Friday dates
   const fridays = generateFridays_(CONFIG.startFriday, CONFIG.numberOfWeeks);
 
-  // Row 1: Header — "Role / Date" + Friday dates
+  // Row 1: Monthly Theme
+  const themeRow = ["Monthly Theme"];
+  for (let i = 0; i < fridays.length; i++) themeRow.push("");
+  sheet.appendRow(themeRow);
+
+  // Row 2: Header — "Role / Date" + Friday dates
   const headerRow = ["Role / Date"];
   fridays.forEach(d => headerRow.push(d));
   sheet.appendRow(headerRow);
 
-  // Format the date header cells
-  const dateRange = sheet.getRange(1, 2, 1, fridays.length);
+  // Format the date header cells (Row 2)
+  const dateRange = sheet.getRange(2, 2, 1, fridays.length);
   dateRange.setNumberFormat("ddd, MMM d");  // e.g. "Fri, May 8"
   dateRange
     .setFontWeight("bold")
@@ -570,12 +599,17 @@ function buildScheduleSheet_(sheet) {
     .setHorizontalAlignment("center")
     .setVerticalAlignment("middle");
 
-  // Role / Date header cell
-  sheet.getRange(1, 1)
+  // Role / Date header cell (Row 2)
+  sheet.getRange(2, 1)
     .setFontWeight("bold")
     .setBackground("#1a73e8")
     .setFontColor("#ffffff")
     .setHorizontalAlignment("center");
+
+  // Format the Monthly Theme row (Row 1)
+  sheet.getRange(1, 1).setFontWeight("bold").setBackground("#fbbc04").setHorizontalAlignment("center");
+  const themeRange = sheet.getRange(1, 2, 1, fridays.length);
+  themeRange.setBackground("#fff2cc").setHorizontalAlignment("center").setVerticalAlignment("middle").setFontWeight("bold");
 
   // Role rows
   roles.forEach(role => {
@@ -585,16 +619,36 @@ function buildScheduleSheet_(sheet) {
     sheet.appendRow(row);
   });
 
-  // Format role column
-  const roleRange = sheet.getRange(2, 1, roles.length, 1);
+  // Format role column (Row 3 onwards)
+  const roleRange = sheet.getRange(3, 1, roles.length, 1);
   roleRange
     .setFontWeight("bold")
     .setBackground("#e8f0fe")
     .setHorizontalAlignment("left")
     .setVerticalAlignment("middle");
 
-  // Freeze header row and role column
-  sheet.setFrozenRows(1);
+  // Merge months in Row 1
+  let currentMonth = -1;
+  let startCol = 2;
+  let count = 0;
+  for (let i = 0; i < fridays.length; i++) {
+    const month = fridays[i].getMonth();
+    if (currentMonth === -1) {
+      currentMonth = month;
+      count = 1;
+    } else if (month === currentMonth) {
+      count++;
+    } else {
+      if (count > 1) sheet.getRange(1, startCol, 1, count).mergeAcross();
+      currentMonth = month;
+      startCol = startCol + count;
+      count = 1;
+    }
+  }
+  if (count > 1) sheet.getRange(1, startCol, 1, count).mergeAcross();
+
+  // Freeze header rows and role column
+  sheet.setFrozenRows(2);
   sheet.setFrozenColumns(1);
 
   // Column widths
@@ -604,8 +658,9 @@ function buildScheduleSheet_(sheet) {
   }
 
   // Row heights
-  sheet.setRowHeight(1, 36);
-  for (let r = 2; r <= roles.length + 1; r++) {
+  sheet.setRowHeight(1, 36); // Theme
+  sheet.setRowHeight(2, 36); // Dates
+  for (let r = 3; r <= roles.length + 2; r++) {
     sheet.setRowHeight(r, 32);
   }
 }
@@ -667,7 +722,7 @@ function refreshAllDropdowns() {
   const numCols = scheduleData[0].length;
 
   // For each role row, set data validation
-  for (let r = 1; r < scheduleData.length; r++) {
+  for (let r = 2; r < scheduleData.length; r++) {
     const role = scheduleData[r][0];
     const eligible = roleToNames[role] || [];
 
@@ -744,8 +799,8 @@ function filterScheduleByRoles_(rolesToShow) {
 
   const lastRow = sheet.getLastRow();
 
-  // Iterate over role rows (row 2 onward)
-  for (let r = 2; r <= lastRow; r++) {
+  // Iterate over role rows (row 3 onward)
+  for (let r = 3; r <= lastRow; r++) {
     const role = sheet.getRange(r, 1).getValue();
     if (rolesToShow.includes(role)) {
       sheet.showRows(r);
@@ -767,7 +822,7 @@ function showAllRoles() {
   if (!sheet) return;
 
   const lastRow = sheet.getLastRow();
-  sheet.showRows(2, lastRow - 1);
+  sheet.showRows(3, lastRow - 2);
   ss.toast("All roles visible ✅", "Scheduler", 3);
 }
 
@@ -817,7 +872,7 @@ function addMoreWeeks() {
   if (!sheet) return;
 
   const lastCol = sheet.getLastColumn();
-  const lastDate = sheet.getRange(1, lastCol).getValue();
+  const lastDate = sheet.getRange(2, lastCol).getValue();
 
   let nextFriday;
   if (lastDate instanceof Date) {
@@ -833,14 +888,51 @@ function addMoreWeeks() {
   // Add new Friday headers
   newFridays.forEach((friday, i) => {
     const col = lastCol + 1 + i;
-    sheet.getRange(1, col).setValue(friday)
+    sheet.getRange(2, col).setValue(friday)
       .setNumberFormat("ddd, MMM d")
       .setFontWeight("bold")
       .setBackground("#1a73e8")
       .setFontColor("#ffffff")
       .setHorizontalAlignment("center");
+    sheet.getRange(1, col).setBackground("#fff2cc")
+      .setHorizontalAlignment("center").setVerticalAlignment("middle").setFontWeight("bold");
     sheet.setColumnWidth(col, 130);
   });
+
+  // Re-merge row 1 for the dates
+  const allDatesRange = sheet.getRange(2, 2, 1, sheet.getLastColumn() - 1);
+  const allDates = allDatesRange.getValues()[0];
+  const themeRowRange = sheet.getRange(1, 2, 1, sheet.getLastColumn() - 1);
+  themeRowRange.breakApart(); // unmerge first
+
+  let currentMonth = -1;
+  let startCol = 2;
+  let count = 0;
+  for (let i = 0; i < allDates.length; i++) {
+    const d = allDates[i];
+    if (Object.prototype.toString.call(d) !== "[object Date]" || isNaN(d)) {
+      if (count > 0) {
+        if (count > 1) sheet.getRange(1, startCol, 1, count).mergeAcross();
+        count = 0;
+      }
+      currentMonth = -1;
+      continue;
+    }
+    const month = d.getMonth();
+    if (currentMonth === -1) {
+      currentMonth = month;
+      count = 1;
+      startCol = 2 + i;
+    } else if (month === currentMonth) {
+      count++;
+    } else {
+      if (count > 1) sheet.getRange(1, startCol, 1, count).mergeAcross();
+      currentMonth = month;
+      startCol = 2 + i;
+      count = 1;
+    }
+  }
+  if (count > 1) sheet.getRange(1, startCol, 1, count).mergeAcross();
 
   // Refresh dropdowns to cover new columns
   refreshAllDropdowns();
@@ -857,9 +949,9 @@ function applyFormatting() {
   const numRows = sheet.getLastRow();
   const numCols = sheet.getLastColumn();
 
-  // Alternating row colors for readability
-  for (let r = 2; r <= numRows; r++) {
-    const bg = (r % 2 === 0) ? "#f8f9fa" : "#ffffff";
+  // Alternating row colors for readability (start at row 3)
+  for (let r = 3; r <= numRows; r++) {
+    const bg = (r % 2 !== 0) ? "#f8f9fa" : "#ffffff";
     sheet.getRange(r, 2, 1, numCols - 1).setBackground(bg);
   }
 
@@ -868,8 +960,8 @@ function applyFormatting() {
   fullRange.setBorder(true, true, true, true, true, true, "#dadce0", SpreadsheetApp.BorderStyle.SOLID);
 
   // Data cells alignment
-  if (numRows > 1 && numCols > 1) {
-    const dataRange = sheet.getRange(2, 2, numRows - 1, numCols - 1);
+  if (numRows > 2 && numCols > 1) {
+    const dataRange = sheet.getRange(3, 2, numRows - 2, numCols - 1);
     dataRange.setHorizontalAlignment("center");
     dataRange.setVerticalAlignment("middle");
     dataRange.setFontSize(10);
@@ -880,23 +972,23 @@ function applyFormatting() {
   // appears multiple times in the same column (same Friday).
   // Rules are ordered by priority: highest severity first.
 
-  const dataRange = sheet.getRange(2, 2, numRows - 1, numCols - 1);
+  const dataRange = sheet.getRange(3, 2, numRows - 2, numCols - 1);
 
-  // Severity 3: 3+ bookings on the same day — DEEP RED + white text
+  // Severity 3: 3+ bookings on the same day — PASTEL RED + black text
   const conflict3Rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(B2<>"", COUNTIF(B$2:B$' + (numRows) + ',B2)>=3)')
-    .setBackground("#c62828")
-    .setFontColor("#ffffff")
-    .setBold(true)
+    .whenFormulaSatisfied('=AND(B3<>"", COUNTIF(B$3:B$' + (numRows) + ',B3)>=3)')
+    .setBackground("#ffcdd2")
+    .setFontColor("#000000")
+    .setBold(false)
     .setRanges([dataRange])
     .build();
 
-  // Severity 2: double-booked (2 on same day) — ORANGE
+  // Severity 2: double-booked (2 on same day) — PASTEL ORANGE + black text
   const conflict2Rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(B2<>"", COUNTIF(B$2:B$' + (numRows) + ',B2)>=2)')
-    .setBackground("#ff9800")
+    .whenFormulaSatisfied('=AND(B3<>"", COUNTIF(B$3:B$' + (numRows) + ',B3)>=2)')
+    .setBackground("#ffe0b2")
     .setFontColor("#000000")
-    .setBold(true)
+    .setBold(false)
     .setRanges([dataRange])
     .build();
 
@@ -954,10 +1046,10 @@ function checkConflicts() {
   const allConflicts = [];
 
   for (let c = 1; c < numCols; c++) {
-    const dateHeader = data[0][c];
+    const dateHeader = data[1][c]; // Dates are now in row 2 (index 1)
     const nameCount = {};  // name → list of roles
 
-    for (let r = 1; r < numRows; r++) {
+    for (let r = 2; r < numRows; r++) { // Roles start in row 3 (index 2)
       const name = data[r][c];
       const role = data[r][0];
       if (name && typeof name === "string" && name.trim() !== "") {
