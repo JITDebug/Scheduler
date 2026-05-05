@@ -157,6 +157,7 @@ function onOpen() {
     .addItem("🔄 Sync Roles",                 "syncRoles")
     .addItem("➕ Add 4 More Weeks",            "addMoreWeeks")
     .addItem("🎨 Re‑apply Formatting",        "applyFormatting")
+    .addItem("🤍 Clear Formatting (Plain Zebra)", "clearFormatting")
     .addSubMenu(groupMenu)
     .addSeparator()
     .addItem("⚙️ Full Setup (reset all)",      "setupScheduler")
@@ -1152,4 +1153,33 @@ function installTrigger_() {
     .forSpreadsheet(SpreadsheetApp.getActiveSpreadsheet())
     .onEdit()
     .create();
+}
+
+// ─── CLEAR FORMATTING ───────────────────────────────────────
+function clearFormatting() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
+  if (!sheet) return;
+
+  const numRows = sheet.getLastRow();
+  const numCols = sheet.getLastColumn();
+
+  if (numRows > 2 && numCols > 1) {
+    const dataRange = sheet.getRange(3, 2, numRows - 2, numCols - 1);
+    
+    // Clear conditional format rules (removes conflict/fatigue indicators)
+    sheet.clearConditionalFormatRules();
+    
+    // Set background to alternating zebra stripes
+    for (let r = 3; r <= numRows; r++) {
+      const bg = (r % 2 !== 0) ? "#f8f9fa" : "#ffffff";
+      sheet.getRange(r, 2, 1, numCols - 1).setBackground(bg);
+    }
+    
+    // Ensure font color is black and not bold
+    dataRange.setFontColor("#000000");
+    dataRange.setFontWeight("normal");
+  }
+
+  ss.toast("Formatting cleared to plain zebra stripes ✅", "Scheduler", 3);
 }
