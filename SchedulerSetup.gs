@@ -1074,17 +1074,119 @@ function checkConflicts() {
   }
 
   const data = sheet.getDataRange().getValues();
+  if (data.length < 3 || data[0].length < 2) return;
+
+  const dateHeaderRow = data[1];
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  
+  // Extract unique Month Year combinations
+  const options = [];
+  const seen = new Set();
+  for (let c = 1; c < dateHeaderRow.length; c++) {
+    const d = dateHeaderRow[c];
+    if (d instanceof Date) {
+      const label = monthNames[d.getMonth()] + " " + d.getFullYear();
+      if (!seen.has(label)) {
+        options.push(label);
+        seen.add(label);
+      }
+    }
+  }
+
+  // If there's only one month, just run it immediately
+  if (options.length <= 1) {
+    runConflictCheck_("all");
+    return;
+  }
+
+  // Create a clean, modern HTML modal for the dropdown
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        * { box-sizing: border-box; }
+        body { 
+          margin: 0; padding: 24px; 
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+          background-color: #ffffff; color: #3c4043;
+          overflow: hidden;
+        }
+        .label { font-size: 14px; font-weight: 500; margin-bottom: 12px; display: block; }
+        select { 
+          width: 100%; height: 40px; padding: 0 12px; border-radius: 4px; border: 1px solid #dadce0; 
+          font-size: 14px; background-color: #fff; outline: none; transition: border 0.2s;
+          cursor: pointer; -webkit-appearance: none; -moz-appearance: none;
+        }
+        select:focus { border: 2px solid #1a73e8; }
+        .buttons { display: flex; justify-content: flex-end; gap: 12px; margin-top: 32px; }
+        button { 
+          height: 36px; padding: 0 24px; border-radius: 4px; font-size: 14px; font-weight: 500; 
+          cursor: pointer; border: 1px solid transparent; transition: background 0.2s;
+        }
+        .btn-cancel { background: none; color: #1a73e8; border: 1px solid #dadce0; }
+        .btn-cancel:hover { background-color: #f8f9fa; }
+        .btn-check { background-color: #1a73e8; color: #ffffff; }
+        .btn-check:hover { background-color: #1b66c9; box-shadow: 0 1px 2px 0 rgba(60,64,67,0.302), 0 1px 3px 1px rgba(60,64,67,0.149); }
+      </style>
+    </head>
+    <body>
+      <label class="label" for="period">Select period to analyze:</label>
+      <select id="period">
+        <option value="all">Check Entire Schedule</option>
+        ${options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+      </select>
+      <div class="buttons">
+        <button class="btn-cancel" onclick="google.script.host.close()">Cancel</button>
+        <button class="btn-check" onclick="startCheck()">Check Now</button>
+      </div>
+      <script>
+        function startCheck() {
+          const val = document.getElementById('period').value;
+          google.script.run.withSuccessHandler(() => google.script.host.close()).runConflictCheck(val);
+        }
+      </script>
+    </body>
+    </html>
+  `;
+
+  const userInterface = HtmlService.createHtmlOutput(html)
+    .setWidth(400)
+    .setHeight(200)
+    .setTitle("Conflict Checker");
+    
+  SpreadsheetApp.getUi().showModalDialog(userInterface, " ");
+}
+
+/**
+ * Server-side function called by the HTML dialog
+ */
+function runConflictCheck(filter) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
+  const data = sheet.getDataRange().getValues();
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  
+  const allConflicts = [];
   const numRows = data.length;
   const numCols = data[0].length;
 
-  // conflicts[col] = { ministerName: [role1, role2, ...] }
-  const allConflicts = [];
-
   for (let c = 1; c < numCols; c++) {
-    const dateHeader = data[1][c]; // Dates are now in row 2 (index 1)
-    const nameCount = {};  // name → list of roles
+    const dateHeader = data[1][c];
+    
+    // Filtering logic
+    if (filter !== "all") {
+      if (dateHeader instanceof Date) {
+        const label = monthNames[dateHeader.getMonth()] + " " + dateHeader.getFullYear();
+        if (label !== filter) continue;
+      } else {
+        continue;
+      }
+    }
 
-    for (let r = 2; r < numRows; r++) { // Roles start in row 3 (index 2)
+    const nameCount = {};
+    for (let r = 2; r < numRows; r++) {
       const name = data[r][c];
       const role = data[r][0];
       if (name && typeof name === "string" && name.trim() !== "") {
@@ -1093,16 +1195,12 @@ function checkConflicts() {
       }
     }
 
-    // Find names that appear more than once
     for (const [name, roles] of Object.entries(nameCount)) {
       if (roles.length >= 2) {
-        // Format the date nicely
-        let dateStr;
-        if (dateHeader instanceof Date) {
-          dateStr = Utilities.formatDate(dateHeader, ss.getSpreadsheetTimeZone(), "EEE, MMM d, yyyy");
-        } else {
-          dateStr = String(dateHeader);
-        }
+        let dateStr = (dateHeader instanceof Date) 
+          ? Utilities.formatDate(dateHeader, ss.getSpreadsheetTimeZone(), "MMM d, yyyy")
+          : String(dateHeader);
+          
         allConflicts.push({
           date: dateStr,
           name: name,
@@ -1113,26 +1211,21 @@ function checkConflicts() {
     }
   }
 
-  // Build the report
   const ui = SpreadsheetApp.getUi();
-
   if (allConflicts.length === 0) {
-    ui.alert("✅ No Conflicts", "No minister is double‑booked on any Friday. All clear!", ui.ButtonSet.OK);
+    ui.alert("✅ No Conflicts", "No conflicts found for " + (filter === "all" ? "the entire schedule" : filter) + ".", ui.ButtonSet.OK);
     return;
   }
 
-  // Sort: worst conflicts first
   allConflicts.sort((a, b) => b.count - a.count || a.date.localeCompare(b.date));
+  let report = "Found " + allConflicts.length + " conflict(s) in " + (filter === "all" ? "the entire schedule" : filter) + ":\n\n";
 
-  let report = "Found " + allConflicts.length + " conflict(s):\n\n";
-
-  allConflicts.forEach((c, i) => {
+  allConflicts.forEach(c => {
     const severity = c.count >= 3 ? "🔴" : "🟠";
     report += severity + " " + c.name + " — " + c.date + "\n";
     report += "   Assigned to " + c.count + " roles: " + c.roles.join(", ") + "\n\n";
   });
 
-  // Summary counts
   const severe = allConflicts.filter(c => c.count >= 3).length;
   const moderate = allConflicts.filter(c => c.count === 2).length;
   report += "──────────────\n";
