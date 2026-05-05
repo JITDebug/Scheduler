@@ -131,7 +131,12 @@ const CONFIG = {
     { name: "BS (Beth)", roles: ["Cooking"] },
     { name: "BS (Ailene)", roles: ["Cooking"] },
     { name: "BS (Clifford)", roles: ["Cooking"] }
-  ]
+  ],
+
+  // URLs for header and footer images (PNG/JPG)
+  // You can replace these with your own URLs
+  printHeaderUrl: "https://via.placeholder.com/1000x150.png?text=CHURCH+MONTHLY+SCHEDULE",
+  printFooterUrl: "https://via.placeholder.com/1000x100.png?text=GOD+BLESS+OUR+MINISTRY"
 };
 
 // ─── MENU ───────────────────────────────────────────────────
@@ -157,11 +162,13 @@ function onOpen() {
     .addItem("⚠️ Check Conflicts",            "checkConflicts")
     .addItem("🎨 Re‑apply Formatting",        "applyFormatting")
     .addItem("🤍 Clear Formatting",           "clearFormatting")
+    .addItem("🖨 Export for Printing",        "exportForPrinting")
     .addSeparator()
     .addItem("➕ Add 4 More Weeks",            "addMoreWeeks")
     .addItem("👥 Update Minister Dropdowns",    "refreshAllDropdowns")
     .addItem("🔄 Sync New/Removed Roles",      "syncRoles")
     .addSeparator()
+    .addItem("🛠 Create/Repair Settings Sheet", "initializeSettingsSheet")
     .addItem("⚙️ Full Setup (WARNING: DELETES ALL DATA)", "setupScheduler")
     .addToUi();
 }
@@ -195,7 +202,14 @@ function setupScheduler() {
   if (roleGroupsSheet) { roleGroupsSheet.getRange(1, 1, roleGroupsSheet.getMaxRows(), roleGroupsSheet.getMaxColumns()).clearDataValidations(); roleGroupsSheet.clear(); }
   else roleGroupsSheet = ss.insertSheet(CONFIG.roleGroupsSheetName);
 
-  // 2. Build Roles sheet first (source of truth)
+  let settingsSheet = ss.getSheetByName("Settings");
+  if (settingsSheet) { settingsSheet.clear(); }
+  else settingsSheet = ss.insertSheet("Settings");
+
+  // 2. Build Settings sheet
+  buildSettingsSheet_(settingsSheet);
+
+  // 3. Build Roles sheet first (source of truth)
   buildRolesSheet_(rolesSheet);
   SpreadsheetApp.flush();  // Ensure roles data is written before other sheets read it
 
@@ -1277,4 +1291,159 @@ function clearFormatting() {
   }
 
   ss.toast("Formatting cleared to plain zebra stripes ✅", "Scheduler", 3);
+}
+
+// ─── PRINTING EXPORT ────────────────────────────────────────
+function exportForPrinting() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const selection = ss.getActiveRange();
+  
+  if (!selection || (selection.getWidth() === 1 && selection.getHeight() === 1 && selection.getValue() === "")) {
+    SpreadsheetApp.getUi().alert("⚠️ Please select the area you want to print first (click and drag your mouse over the cells).");
+    return;
+  }
+
+  generatePrintableFromSelection(selection);
+}
+
+/**
+ * Public function to create the Settings sheet without a full reset
+ */
+function initializeSettingsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("Settings");
+  if (sheet) {
+    const response = SpreadsheetApp.getUi().alert("Settings sheet already exists. Overwrite it?", SpreadsheetApp.getUi().ButtonSet.YES_NO);
+    if (response !== SpreadsheetApp.getUi().Button.YES) return;
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet("Settings");
+  }
+  buildSettingsSheet_(sheet);
+  ss.setActiveSheet(sheet);
+  ss.toast("Settings sheet created! ✅", "Scheduler", 3);
+}
+
+// ─── SETTINGS HELPER ────────────────────────────────────────
+function buildSettingsSheet_(sheet) {
+  const settings = [
+    ["Setting Name", "Image / Value", "Instructions"],
+    ["Header Image", "", "Insert your header logo/banner in the cell to the left (Insert ▸ Image ▸ Image over cells) and position it here."],
+    ["Footer Image", "", "Insert your footer image in the cell to the left (Insert ▸ Image ▸ Image over cells) and position it here."]
+  ];
+  sheet.getRange(1, 1, settings.length, settings[0].length).setValues(settings);
+  
+  // Formatting
+  sheet.getRange(1, 1, 1, 3).setFontWeight("bold").setBackground("#455a64").setFontColor("#ffffff");
+  sheet.setColumnWidth(1, 150);
+  sheet.setColumnWidth(2, 600);
+  sheet.setColumnWidth(3, 400);
+  sheet.setRowHeight(2, 100); // Space for header image
+  sheet.setRowHeight(3, 80);  // Space for footer image
+  sheet.setFrozenRows(1);
+}
+
+// ─── SETTINGS HELPER ────────────────────────────────────────
+function buildSettingsSheet_(sheet) {
+  const settings = [
+    ["Setting Name", "Image", "Instructions"],
+    ["Header Image", "", "Go to B2 and select Insert ▸ Image ▸ Image in cell"],
+    ["Footer Image", "", "Go to B3 and select Insert ▸ Image ▸ Image in cell"]
+  ];
+  sheet.getRange(1, 1, settings.length, settings[0].length).setValues(settings);
+  
+  // Formatting
+  sheet.getRange(1, 1, 1, 3).setFontWeight("bold").setBackground("#455a64").setFontColor("#ffffff");
+  sheet.setColumnWidth(1, 150);
+  sheet.setColumnWidth(2, 600);
+  sheet.setColumnWidth(3, 400);
+  sheet.setRowHeight(2, 100); 
+  sheet.setRowHeight(3, 100);
+  sheet.setFrozenRows(1);
+
+  // Center the image cells
+  sheet.getRange("B2:B3").setHorizontalAlignment("center").setVerticalAlignment("middle");
+}
+
+function getPrintImages_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Settings");
+  if (!sheet) return { header: null, footer: null };
+
+  return {
+    header: sheet.getRange(2, 2).getValue(),
+    footer: sheet.getRange(3, 2).getValue()
+  };
+}
+
+/**
+ * Generates a specialized sheet based on current selection
+ */
+function generatePrintableFromSelection(selection) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const mainSheet = selection.getSheet();
+  const printImages = getPrintImages_();
+  
+  const numRows = selection.getNumRows();
+  const numCols = selection.getNumColumns();
+  const startRow = selection.getRow();
+  const startCol = selection.getColumn();
+
+  if (numRows === 0 || numCols === 0) return;
+
+  // Create or clean the print sheet
+  const printSheetName = "Print - Selection";
+  let printSheet = ss.getSheetByName(printSheetName);
+  if (printSheet) {
+    ss.deleteSheet(printSheet);
+  }
+  printSheet = ss.insertSheet(printSheetName);
+  
+  // 1. Prepare the print grid
+  const headerOffset = 7;
+  const targetRange = printSheet.getRange(headerOffset, 1, numRows, numCols);
+  
+  // Copy selection in one go (Values + Formats)
+  selection.copyTo(targetRange);
+  targetRange.clearDataValidations();
+
+  // Match row heights and column widths
+  for (let r = 0; r < numRows; r++) {
+    printSheet.setRowHeight(headerOffset + r, mainSheet.getRowHeight(startRow + r));
+  }
+  for (let c = 0; c < numCols; c++) {
+    printSheet.setColumnWidth(c + 1, mainSheet.getColumnWidth(startCol + c));
+  }
+
+  SpreadsheetApp.flush(); // Ensure data is settled before merging
+
+  // 3. Insert Header Image
+  try {
+    const settingsSheet = ss.getSheetByName("Settings");
+    if (settingsSheet) {
+      const headerRange = printSheet.getRange(1, 1, headerOffset - 1, numCols);
+      settingsSheet.getRange(2, 2).copyTo(printSheet.getRange(1, 1));
+      headerRange.merge().setHorizontalAlignment("center").setVerticalAlignment("middle");
+    }
+  } catch (e) { console.log("Header image failed: " + e); }
+
+  // 4. Insert Footer Image
+  try {
+    const settingsSheet = ss.getSheetByName("Settings");
+    if (settingsSheet) {
+      const footerRow = headerOffset + numRows + 1;
+      const footerHeight = headerOffset - 1; // Match header height
+      const footerRange = printSheet.getRange(footerRow, 1, footerHeight, numCols);
+      settingsSheet.getRange(3, 2).copyTo(printSheet.getRange(footerRow, 1));
+      footerRange.merge().setHorizontalAlignment("center").setVerticalAlignment("middle");
+    }
+  } catch (e) { console.log("Footer image failed: " + e); }
+
+  // 5. Polish UI
+  try {
+    printSheet.setHideGridlines(true);
+  } catch (e) {}
+  
+  ss.setActiveSheet(printSheet);
+  ss.toast("Print sheet generated from selection! ✅", "Success", 5);
 }
