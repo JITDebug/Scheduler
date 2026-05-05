@@ -152,15 +152,17 @@ function onOpen() {
   groupMenu.addItem("👁 Show All Roles", "showAllRoles");
 
   ui.createMenu("⏱ Scheduler")
-    .addItem("🔄 Refresh Dropdowns",          "refreshAllDropdowns")
-    .addItem("⚠️ Check Conflicts",            "checkConflicts")
-    .addItem("🔄 Sync Roles",                 "syncRoles")
-    .addItem("➕ Add 4 More Weeks",            "addMoreWeeks")
-    .addItem("🎨 Re‑apply Formatting",        "applyFormatting")
-    .addItem("🤍 Clear Formatting (Plain Zebra)", "clearFormatting")
     .addSubMenu(groupMenu)
     .addSeparator()
-    .addItem("⚙️ Full Setup (reset all)",      "setupScheduler")
+    .addItem("⚠️ Check Conflicts",            "checkConflicts")
+    .addItem("🎨 Re‑apply Formatting",        "applyFormatting")
+    .addItem("🤍 Clear Formatting",           "clearFormatting")
+    .addSeparator()
+    .addItem("➕ Add 4 More Weeks",            "addMoreWeeks")
+    .addItem("👥 Update Minister Dropdowns",    "refreshAllDropdowns")
+    .addItem("🔄 Sync New/Removed Roles",      "syncRoles")
+    .addSeparator()
+    .addItem("⚙️ Full Setup (WARNING: DELETES ALL DATA)", "setupScheduler")
     .addToUi();
 }
 
