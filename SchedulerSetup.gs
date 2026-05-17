@@ -4,12 +4,12 @@
 //  then run  setupScheduler()  once from the toolbar (▶).
 // ============================================================
 
-// ─── CONFIG ─────────────────────────────────────────────────
 const CONFIG = {
   schedulerSheetName: "Schedule",
   ministersSheetName: "Ministers",
   roleGroupsSheetName: "Role Groups",
   rolesSheetName: "Roles",
+  vacationsSheetName: "Vacations",
   // Starting Friday – change to whatever date you need.
   // Format: year, month (0‑based!), day
   startFriday: new Date(2026, 4, 8),   // May 8 2026 (Friday)
@@ -169,6 +169,7 @@ function onOpen() {
     .addItem("🔄 Sync New/Removed Roles",      "syncRoles")
     .addSeparator()
     .addItem("🛠 Create/Repair Settings Sheet", "initializeSettingsSheet")
+    .addItem("🏖 Create/Repair Vacations Sheet", "initializeVacationsSheet")
     .addItem("⚙️ Full Setup (WARNING: DELETES ALL DATA)", "setupScheduler")
     .addToUi();
 }
@@ -178,7 +179,7 @@ function setupScheduler() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
     "Setup Scheduler",
-    "This will create / overwrite the Schedule, Ministers, Roles, and Role Groups sheets.\nContinue?",
+    "This will create / overwrite the Schedule, Ministers, Roles, Vacations, and Role Groups sheets.\nContinue?",
     ui.ButtonSet.YES_NO
   );
   if (response !== ui.Button.YES) return;
@@ -206,8 +207,15 @@ function setupScheduler() {
   if (settingsSheet) { settingsSheet.clear(); }
   else settingsSheet = ss.insertSheet("Settings");
 
+  let vacationsSheet = ss.getSheetByName(CONFIG.vacationsSheetName);
+  if (vacationsSheet) { vacationsSheet.getRange(1, 1, vacationsSheet.getMaxRows(), vacationsSheet.getMaxColumns()).clearDataValidations(); vacationsSheet.clear(); }
+  else vacationsSheet = ss.insertSheet(CONFIG.vacationsSheetName);
+
   // 2. Build Settings sheet
   buildSettingsSheet_(settingsSheet);
+
+  // 2.5 Build Vacations sheet
+  buildVacationsSheet_(vacationsSheet);
 
   // 3. Build Roles sheet first (source of truth)
   buildRolesSheet_(rolesSheet);
@@ -240,6 +248,7 @@ function setupScheduler() {
     "• Edit the Roles sheet to add/remove positions.\n" +
     "• Edit the Ministers sheet to manage people and role eligibility.\n" +
     "• Edit the Role Groups sheet to organize roles into groups.\n" +
+    "• Edit the Vacations sheet to track unavailabilities.\n" +
     "• Run Scheduler ▸ Sync Roles after changing the Roles sheet.\n" +
     "• Dropdowns auto‑update when you change the Ministers sheet."
   );
@@ -702,9 +711,39 @@ function refreshAllDropdowns() {
     }
   });
 
+  // Read vacations data
+  let vacations = [];
+  const vacationsSheet = ss.getSheetByName(CONFIG.vacationsSheetName);
+  if (vacationsSheet) {
+    const vacData = vacationsSheet.getDataRange().getValues();
+    for (let i = 1; i < vacData.length; i++) {
+      const name = vacData[i][0];
+      const start = vacData[i][1];
+      const end = vacData[i][2];
+      if (name && start instanceof Date && end instanceof Date) {
+        const sDate = new Date(start); sDate.setHours(0,0,0,0);
+        const eDate = new Date(end); eDate.setHours(23,59,59,999);
+        vacations.push({name: name.toString().trim(), start: sDate.getTime(), end: eDate.getTime()});
+      }
+    }
+  }
+
   // Read schedule structure
   const scheduleData = scheduleSheet.getDataRange().getValues();
   const numCols = scheduleData[0].length;
+  if (numCols < 2) return;
+
+  const scheduleDates = [];
+  for (let c = 1; c < numCols; c++) {
+    const cellVal = scheduleData[1][c];
+    if (cellVal instanceof Date) {
+      const d = new Date(cellVal);
+      d.setHours(12,0,0,0);
+      scheduleDates[c] = d.getTime();
+    } else {
+      scheduleDates[c] = null;
+    }
+  }
 
   // For each role row (starting from top to scrub headers too), set data validation
   const validRoles = getRoles_();
@@ -722,13 +761,33 @@ function refreshAllDropdowns() {
     const range = scheduleSheet.getRange(r + 1, 2, 1, numCols - 1);
 
     if (eligible.length > 0) {
-      const rule = SpreadsheetApp.newDataValidation()
-        .requireValueInList(eligible, true)  // true = show dropdown
-        .setAllowInvalid(false)
-        .build();
+      const rulesRow = [];
+      let hasAnyWarning = false;
 
-      // Apply to all date columns in this row
-      range.setDataValidation(rule);
+      for (let c = 1; c < numCols; c++) {
+        const sDate = scheduleDates[c];
+        let validMinisters = eligible;
+        
+        if (sDate) {
+          validMinisters = eligible.filter(m => {
+            return !vacations.some(v => v.name === m && sDate >= v.start && sDate <= v.end);
+          });
+        }
+
+        if (validMinisters.length > 0) {
+          rulesRow.push(
+            SpreadsheetApp.newDataValidation()
+              .requireValueInList(validMinisters, true)
+              .setAllowInvalid(false)
+              .build()
+          );
+        } else {
+          rulesRow.push(null);
+          hasAnyWarning = true;
+        }
+      }
+
+      range.setDataValidations([rulesRow]);
       range.clearNote(); // Important: remove the warning if it existed!
     } else {
       // No eligible ministers — clear validation but add a note
@@ -1063,11 +1122,11 @@ function applyFormatting() {
 }
 
 // ─── AUTO‑UPDATE TRIGGER ────────────────────────────────────
-// When the Ministers sheet is edited, automatically refresh dropdowns.
+// When the Ministers or Vacations sheet is edited, automatically refresh dropdowns.
 function onEditTrigger(e) {
   try {
     const sheetName = e.source.getActiveSheet().getName();
-    if (sheetName === CONFIG.ministersSheetName) {
+    if (sheetName === CONFIG.ministersSheetName || sheetName === CONFIG.vacationsSheetName) {
       refreshAllDropdowns();
     }
   } catch (err) {
@@ -1446,4 +1505,64 @@ function generatePrintableFromSelection(selection) {
   
   ss.setActiveSheet(printSheet);
   ss.toast("Print sheet generated from selection! ✅", "Success", 5);
+}
+
+// ─── VACATIONS HELPER ────────────────────────────────────────
+function initializeVacationsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.vacationsSheetName || "Vacations");
+  if (sheet) {
+    const response = SpreadsheetApp.getUi().alert("Vacations sheet already exists. Overwrite it?", SpreadsheetApp.getUi().ButtonSet.YES_NO);
+    if (response !== SpreadsheetApp.getUi().Button.YES) return;
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet(CONFIG.vacationsSheetName || "Vacations");
+  }
+  buildVacationsSheet_(sheet);
+  ss.setActiveSheet(sheet);
+  ss.toast("Vacations sheet created! ✅", "Scheduler", 3);
+}
+
+function buildVacationsSheet_(sheet) {
+  sheet.appendRow(["Minister Name", "Start Date", "End Date", "", "ℹ️ Instructions"]);
+  
+  // Format header
+  const headerRange = sheet.getRange(1, 1, 1, 5);
+  headerRange
+    .setFontWeight("bold")
+    .setBackground("#fbbc04")
+    .setFontColor("#000000")
+    .setHorizontalAlignment("center");
+    
+  sheet.setColumnWidth(1, 200);
+  sheet.setColumnWidth(2, 120);
+  sheet.setColumnWidth(3, 120);
+  sheet.setColumnWidth(4, 50); // spacer
+  sheet.setColumnWidth(5, 500); // instructions
+  sheet.setFrozenRows(1);
+  
+  // Data validation for Minister Name (dropdown from Ministers sheet)
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ministersSheet = ss.getSheetByName(CONFIG.ministersSheetName);
+  if (ministersSheet) {
+    // We only need column A starting from row 2
+    // But since the number of rows might change, we define a dynamic range
+    const rule = SpreadsheetApp.newDataValidation()
+      .requireValueInRange(ministersSheet.getRange("A2:A"), true)
+      .setAllowInvalid(true)
+      .build();
+    sheet.getRange("A2:A").setDataValidation(rule);
+  }
+  
+  // Date validation for Start Date and End Date
+  const dateRule = SpreadsheetApp.newDataValidation()
+    .requireDate()
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange("B2:C").setDataValidation(dateRule);
+
+  // Instructions
+  sheet.getRange("E2").setValue("Add minister vacations here. They will be removed from dropdowns for dates within their vacation period.").setFontColor("#666666").setFontStyle("italic");
+  sheet.getRange("E3").setValue("Start Date and End Date must be valid dates (e.g. 5/14/2026).").setFontColor("#666666").setFontStyle("italic");
+  sheet.getRange("E4").setValue("Make sure to run Scheduler ▸ Update Minister Dropdowns after adding vacations!").setFontColor("#666666").setFontStyle("italic");
 }
