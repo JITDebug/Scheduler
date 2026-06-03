@@ -1753,7 +1753,7 @@ function generatePrintableFromRange_(srcSheet, rows, cols) {
   try {
     const settingsSheet = ss.getSheetByName("Settings");
     if (settingsSheet) {
-      const footerRow = headerOffset + numRows + 1;
+      const footerRow = headerOffset + numRows;
       const footerHeight = headerOffset - 1;
       const footerRange = printSheet.getRange(footerRow, 1, footerHeight, numCols);
       settingsSheet.getRange(3, 2).copyTo(printSheet.getRange(footerRow, 1));
