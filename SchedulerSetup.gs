@@ -1353,16 +1353,220 @@ function clearFormatting() {
 }
 
 // ─── PRINTING EXPORT ────────────────────────────────────────
+/**
+ * Shows a modal dialog to select a 2-month range for printing.
+ * The user picks a starting month and the print covers that month + the next.
+ * Hidden rows (from group filtering) are automatically excluded.
+ */
 function exportForPrinting() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const selection = ss.getActiveRange();
-  
-  if (!selection || (selection.getWidth() === 1 && selection.getHeight() === 1 && selection.getValue() === "")) {
-    SpreadsheetApp.getUi().alert("⚠️ Please select the area you want to print first (click and drag your mouse over the cells).");
+  const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert("Schedule sheet not found. Run Full Setup first.");
     return;
   }
 
-  generatePrintableFromSelection(selection);
+  const data = sheet.getDataRange().getValues();
+  const dateHeaderRow = data[1]; // Row 2 contains dates
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+                      "July", "August", "September", "October", "November", "December"];
+
+  // Extract unique Month-Year labels from the date header
+  const options = [];
+  const seen = new Set();
+  for (let c = 1; c < dateHeaderRow.length; c++) {
+    const d = dateHeaderRow[c];
+    if (d instanceof Date) {
+      const label = monthNames[d.getMonth()] + " " + d.getFullYear();
+      if (!seen.has(label)) {
+        options.push({ label: label, month: d.getMonth(), year: d.getFullYear() });
+        seen.add(label);
+      }
+    }
+  }
+
+  if (options.length === 0) {
+    SpreadsheetApp.getUi().alert("No dates found on the Schedule sheet.");
+    return;
+  }
+
+  // Build the paired options: each starting month + next month
+  const pairedOptions = [];
+  for (let i = 0; i < options.length; i++) {
+    const startOpt = options[i];
+    // Find the next month that exists in the schedule
+    const nextOpt = (i + 1 < options.length) ? options[i + 1] : null;
+    if (nextOpt) {
+      pairedOptions.push({
+        label: startOpt.label + " – " + nextOpt.label,
+        startMonth: startOpt.month,
+        startYear: startOpt.year,
+        endMonth: nextOpt.month,
+        endYear: nextOpt.year
+      });
+    } else {
+      // Last month available — single month print
+      pairedOptions.push({
+        label: startOpt.label + " (single month)",
+        startMonth: startOpt.month,
+        startYear: startOpt.year,
+        endMonth: startOpt.month,
+        endYear: startOpt.year
+      });
+    }
+  }
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0; padding: 24px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          background-color: #ffffff; color: #3c4043;
+          overflow: hidden;
+        }
+        .label { font-size: 14px; font-weight: 500; margin-bottom: 12px; display: block; }
+        .hint  { font-size: 12px; color: #80868b; margin-bottom: 16px; }
+        select {
+          width: 100%; height: 40px; padding: 0 12px; border-radius: 4px; border: 1px solid #dadce0;
+          font-size: 14px; background-color: #fff; outline: none; transition: border 0.2s;
+          cursor: pointer; -webkit-appearance: none; -moz-appearance: none;
+        }
+        select:focus { border: 2px solid #1a73e8; }
+        .buttons { display: flex; justify-content: flex-end; gap: 12px; margin-top: 28px; }
+        button {
+          height: 36px; padding: 0 24px; border-radius: 4px; font-size: 14px; font-weight: 500;
+          cursor: pointer; border: 1px solid transparent; transition: background 0.2s;
+        }
+        .btn-cancel { background: none; color: #1a73e8; border: 1px solid #dadce0; }
+        .btn-cancel:hover { background-color: #f8f9fa; }
+        .btn-print { background-color: #1a73e8; color: #ffffff; }
+        .btn-print:hover { background-color: #1b66c9; box-shadow: 0 1px 2px 0 rgba(60,64,67,0.302), 0 1px 3px 1px rgba(60,64,67,0.149); }
+      </style>
+    </head>
+    <body>
+      <label class="label" for="range">Select 2-month range to print:</label>
+      <p class="hint">Hidden rows (filtered groups) will be excluded automatically.</p>
+      <select id="range">
+        ${pairedOptions.map((opt, i) => '<option value="' + i + '">' + opt.label + '</option>').join('')}
+      </select>
+      <div class="buttons">
+        <button class="btn-cancel" onclick="google.script.host.close()">Cancel</button>
+        <button class="btn-print" onclick="startPrint()">🖨 Generate Print Sheet</button>
+      </div>
+      <script>
+        function startPrint() {
+          const idx = parseInt(document.getElementById('range').value);
+          google.script.run
+            .withSuccessHandler(function() { google.script.host.close(); })
+            .runPrintRange(idx);
+        }
+      </script>
+    </body>
+    </html>
+  `;
+
+  const userInterface = HtmlService.createHtmlOutput(html)
+    .setWidth(420)
+    .setHeight(230)
+    .setTitle("Print Range");
+
+  SpreadsheetApp.getUi().showModalDialog(userInterface, "🖨 Export for Printing");
+}
+
+/**
+ * Server-side function called by the print dialog.
+ * Receives the index of the selected paired option, re-derives the months,
+ * and generates the print sheet.
+ */
+function runPrintRange(pairedIndex) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
+  if (!sheet) return;
+
+  const data = sheet.getDataRange().getValues();
+  const dateHeaderRow = data[1];
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+                      "July", "August", "September", "October", "November", "December"];
+
+  // Re-derive the paired options (same logic as exportForPrinting)
+  const options = [];
+  const seen = new Set();
+  for (let c = 1; c < dateHeaderRow.length; c++) {
+    const d = dateHeaderRow[c];
+    if (d instanceof Date) {
+      const label = monthNames[d.getMonth()] + " " + d.getFullYear();
+      if (!seen.has(label)) {
+        options.push({ label: label, month: d.getMonth(), year: d.getFullYear() });
+        seen.add(label);
+      }
+    }
+  }
+
+  const pairedOptions = [];
+  for (let i = 0; i < options.length; i++) {
+    const startOpt = options[i];
+    const nextOpt = (i + 1 < options.length) ? options[i + 1] : null;
+    if (nextOpt) {
+      pairedOptions.push({
+        startMonth: startOpt.month, startYear: startOpt.year,
+        endMonth: nextOpt.month, endYear: nextOpt.year
+      });
+    } else {
+      pairedOptions.push({
+        startMonth: startOpt.month, startYear: startOpt.year,
+        endMonth: startOpt.month, endYear: startOpt.year
+      });
+    }
+  }
+
+  if (pairedIndex < 0 || pairedIndex >= pairedOptions.length) return;
+  const chosen = pairedOptions[pairedIndex];
+
+  // Determine which columns (dates) fall within the chosen range
+  const colIndices = []; // 1-based column indices on the sheet
+  for (let c = 1; c < dateHeaderRow.length; c++) {
+    const d = dateHeaderRow[c];
+    if (d instanceof Date) {
+      const m = d.getMonth();
+      const y = d.getFullYear();
+      const inRange =
+        (y === chosen.startYear && m === chosen.startMonth) ||
+        (y === chosen.endYear && m === chosen.endMonth);
+      if (inRange) {
+        colIndices.push(c + 1); // +1 because data array is 0-based but sheet is 1-based
+      }
+    }
+  }
+
+  if (colIndices.length === 0) {
+    SpreadsheetApp.getUi().alert("No dates found for the selected range.");
+    return;
+  }
+
+  // Always include column 1 (Role names) as the first column
+  const allCols = [1, ...colIndices];
+
+  // Determine which rows to include — skip hidden rows
+  // Include row 1 (Monthly Theme) and row 2 (Date headers), then visible role rows
+  const visibleRows = [1, 2]; // theme + header
+  const lastRow = sheet.getLastRow();
+  for (let r = 3; r <= lastRow; r++) {
+    if (!sheet.isRowHiddenByUser(r)) {
+      visibleRows.push(r);
+    }
+  }
+
+  if (visibleRows.length <= 2) {
+    SpreadsheetApp.getUi().alert("No visible role rows to print. Show some roles first.");
+    return;
+  }
+
+  generatePrintableFromRange_(sheet, visibleRows, allCols);
 }
 
 /**
@@ -1381,25 +1585,6 @@ function initializeSettingsSheet() {
   buildSettingsSheet_(sheet);
   ss.setActiveSheet(sheet);
   ss.toast("Settings sheet created! ✅", "Scheduler", 3);
-}
-
-// ─── SETTINGS HELPER ────────────────────────────────────────
-function buildSettingsSheet_(sheet) {
-  const settings = [
-    ["Setting Name", "Image / Value", "Instructions"],
-    ["Header Image", "", "Insert your header logo/banner in the cell to the left (Insert ▸ Image ▸ Image over cells) and position it here."],
-    ["Footer Image", "", "Insert your footer image in the cell to the left (Insert ▸ Image ▸ Image over cells) and position it here."]
-  ];
-  sheet.getRange(1, 1, settings.length, settings[0].length).setValues(settings);
-  
-  // Formatting
-  sheet.getRange(1, 1, 1, 3).setFontWeight("bold").setBackground("#455a64").setFontColor("#ffffff");
-  sheet.setColumnWidth(1, 150);
-  sheet.setColumnWidth(2, 600);
-  sheet.setColumnWidth(3, 400);
-  sheet.setRowHeight(2, 100); // Space for header image
-  sheet.setRowHeight(3, 80);  // Space for footer image
-  sheet.setFrozenRows(1);
 }
 
 // ─── SETTINGS HELPER ────────────────────────────────────────
@@ -1436,47 +1621,125 @@ function getPrintImages_() {
 }
 
 /**
- * Generates a specialized sheet based on current selection
+ * Generates a print sheet from specific rows and columns of the Schedule sheet.
+ * Uses batch read/write operations to avoid slow cell-by-cell API calls.
+ * @param {Sheet} srcSheet - The source Schedule sheet
+ * @param {number[]} rows - Array of 1-based row indices to include
+ * @param {number[]} cols - Array of 1-based column indices to include
  */
-function generatePrintableFromSelection(selection) {
+function generatePrintableFromRange_(srcSheet, rows, cols) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const mainSheet = selection.getSheet();
-  const printImages = getPrintImages_();
-  
-  const numRows = selection.getNumRows();
-  const numCols = selection.getNumColumns();
-  const startRow = selection.getRow();
-  const startCol = selection.getColumn();
 
+  const numRows = rows.length;
+  const numCols = cols.length;
   if (numRows === 0 || numCols === 0) return;
 
-  // Create or clean the print sheet
+  // 1. Batch-read ALL formatting data from source sheet in one go
+  const fullRange = srcSheet.getDataRange();
+  const allValues      = fullRange.getValues();
+  const allBgs         = fullRange.getBackgrounds();
+  const allFontColors  = fullRange.getFontColors();
+  const allFontWeights = fullRange.getFontWeights();
+  const allFontSizes   = fullRange.getFontSizes();
+  const allHAligns     = fullRange.getHorizontalAlignments();
+  const allVAligns     = fullRange.getVerticalAlignments();
+  const allNumFormats  = fullRange.getNumberFormats();
+
+  // 2. Assemble only the needed rows/cols into output arrays (in-memory)
+  const values = [], bgs = [], fontColors = [], fontWeights = [];
+  const fontSizes = [], hAligns = [], vAligns = [], numFormats = [];
+
+  for (let r = 0; r < numRows; r++) {
+    const srcRow = rows[r] - 1; // convert to 0-based index
+    const vRow = [], bgRow = [], fcRow = [], fwRow = [];
+    const fsRow = [], haRow = [], vaRow = [], nfRow = [];
+    for (let c = 0; c < numCols; c++) {
+      const srcCol = cols[c] - 1; // convert to 0-based index
+      vRow.push(allValues[srcRow][srcCol]);
+      bgRow.push(allBgs[srcRow][srcCol]);
+      fcRow.push(allFontColors[srcRow][srcCol]);
+      fwRow.push(allFontWeights[srcRow][srcCol]);
+      fsRow.push(allFontSizes[srcRow][srcCol]);
+      haRow.push(allHAligns[srcRow][srcCol]);
+      vaRow.push(allVAligns[srcRow][srcCol]);
+      nfRow.push(allNumFormats[srcRow][srcCol]);
+    }
+    values.push(vRow);       bgs.push(bgRow);
+    fontColors.push(fcRow);  fontWeights.push(fwRow);
+    fontSizes.push(fsRow);   hAligns.push(haRow);
+    vAligns.push(vaRow);     numFormats.push(nfRow);
+  }
+
+  // 3. Create or clean the print sheet
   const printSheetName = "Print - Selection";
   let printSheet = ss.getSheetByName(printSheetName);
   if (printSheet) {
     ss.deleteSheet(printSheet);
   }
   printSheet = ss.insertSheet(printSheetName);
-  
-  // 1. Prepare the print grid
+
+  // 4. Batch-write everything to the print sheet
   const headerOffset = 7;
   const targetRange = printSheet.getRange(headerOffset, 1, numRows, numCols);
-  
-  // Copy selection in one go (Values + Formats)
-  selection.copyTo(targetRange);
+  targetRange.setValues(values);
+  targetRange.setBackgrounds(bgs);
+  targetRange.setFontColors(fontColors);
+  targetRange.setFontWeights(fontWeights);
+  targetRange.setFontSizes(fontSizes);
+  targetRange.setHorizontalAlignments(hAligns);
+  targetRange.setVerticalAlignments(vAligns);
+  targetRange.setNumberFormats(numFormats);
   targetRange.clearDataValidations();
+  targetRange.setBorder(true, true, true, true, true, true, "#dadce0", SpreadsheetApp.BorderStyle.SOLID);
 
-  // Match row heights and column widths
+  // 4.5. Re-apply merges in Row 1 of the print sheet (Monthly Theme)
+  if (numCols > 2 && values.length > 1) {
+    const printDates = values[1].slice(1);
+    let currentMonth = -1;
+    let startCol = 2;
+    let count = 0;
+    
+    for (let i = 0; i < printDates.length; i++) {
+      const d = printDates[i];
+      if (d instanceof Date) {
+        const month = d.getMonth();
+        if (currentMonth === -1) {
+          currentMonth = month;
+          count = 1;
+        } else if (month === currentMonth) {
+          count++;
+        } else {
+          if (count > 1) {
+            printSheet.getRange(headerOffset, startCol, 1, count).mergeAcross();
+          }
+          currentMonth = month;
+          startCol = 2 + i;
+          count = 1;
+        }
+      } else {
+        if (count > 1) {
+          printSheet.getRange(headerOffset, startCol, 1, count).mergeAcross();
+        }
+        currentMonth = -1;
+        count = 0;
+      }
+    }
+    if (count > 1) {
+      printSheet.getRange(headerOffset, startCol, 1, count).mergeAcross();
+    }
+  }
+
+  // 5. Match row heights and column widths
   for (let r = 0; r < numRows; r++) {
-    printSheet.setRowHeight(headerOffset + r, mainSheet.getRowHeight(startRow + r));
+    printSheet.setRowHeight(headerOffset + r, srcSheet.getRowHeight(rows[r]));
   }
   for (let c = 0; c < numCols; c++) {
-    printSheet.setColumnWidth(c + 1, mainSheet.getColumnWidth(startCol + c));
+    printSheet.setColumnWidth(c + 1, srcSheet.getColumnWidth(cols[c]));
   }
 
-  SpreadsheetApp.flush(); // Ensure data is settled before merging
+  SpreadsheetApp.flush();
 
-  // 3. Insert Header Image
+  // 6. Insert Header Image
   try {
     const settingsSheet = ss.getSheetByName("Settings");
     if (settingsSheet) {
@@ -1486,25 +1749,25 @@ function generatePrintableFromSelection(selection) {
     }
   } catch (e) { console.log("Header image failed: " + e); }
 
-  // 4. Insert Footer Image
+  // 7. Insert Footer Image
   try {
     const settingsSheet = ss.getSheetByName("Settings");
     if (settingsSheet) {
       const footerRow = headerOffset + numRows + 1;
-      const footerHeight = headerOffset - 1; // Match header height
+      const footerHeight = headerOffset - 1;
       const footerRange = printSheet.getRange(footerRow, 1, footerHeight, numCols);
       settingsSheet.getRange(3, 2).copyTo(printSheet.getRange(footerRow, 1));
       footerRange.merge().setHorizontalAlignment("center").setVerticalAlignment("middle");
     }
   } catch (e) { console.log("Footer image failed: " + e); }
 
-  // 5. Polish UI
+  // 8. Polish UI
   try {
     printSheet.setHideGridlines(true);
   } catch (e) {}
-  
+
   ss.setActiveSheet(printSheet);
-  ss.toast("Print sheet generated from selection! ✅", "Success", 5);
+  ss.toast("Print sheet generated! ✅", "Success", 5);
 }
 
 // ─── VACATIONS HELPER ────────────────────────────────────────
