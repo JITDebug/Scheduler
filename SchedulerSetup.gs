@@ -844,6 +844,8 @@ function getGroupRoles_(groupName) {
 
 /**
  * Core filter function — shows only the rows whose role is in the given list.
+ * Optimized: batch-reads all role names in one call, then groups contiguous
+ * rows for bulk show/hide to minimize API round-trips.
  */
 function filterScheduleByRoles_(rolesToShow) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -851,14 +853,35 @@ function filterScheduleByRoles_(rolesToShow) {
   if (!sheet) return;
 
   const lastRow = sheet.getLastRow();
+  if (lastRow < 3) return;
 
-  // Iterate over role rows (row 3 onward)
-  for (let r = 3; r <= lastRow; r++) {
-    const role = sheet.getRange(r, 1).getValue();
-    if (rolesToShow.includes(role)) {
-      sheet.showRows(r);
-    } else {
-      sheet.hideRows(r);
+  // Convert rolesToShow to a Set for O(1) lookups instead of O(n) Array.includes
+  const roleSet = new Set(rolesToShow);
+
+  // Batch-read all role names in column A (rows 3..lastRow) in one API call
+  const roleValues = sheet.getRange(3, 1, lastRow - 2, 1).getValues();
+
+  // Build an array of show/hide decisions
+  // Then group contiguous rows with the same decision into batches
+  let batchStart = 3;
+  let batchShouldShow = roleSet.has(String(roleValues[0][0]).trim());
+
+  for (let i = 1; i <= roleValues.length; i++) {
+    const r = i + 3; // current sheet row (1-based)
+    const shouldShow = (i < roleValues.length)
+      ? roleSet.has(String(roleValues[i][0]).trim())
+      : !batchShouldShow; // force flush of last batch
+
+    if (shouldShow !== batchShouldShow) {
+      // Flush the previous batch
+      const count = r - batchStart;
+      if (batchShouldShow) {
+        sheet.showRows(batchStart, count);
+      } else {
+        sheet.hideRows(batchStart, count);
+      }
+      batchStart = r;
+      batchShouldShow = shouldShow;
     }
   }
 
