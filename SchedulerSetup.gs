@@ -1158,44 +1158,92 @@ function onEditTrigger(e) {
   }
 }
 
-// ─── CONFLICT CHECKER ───────────────────────────────────────
-// Scans the Schedule sheet and reports all ministers who are
-// booked into multiple roles on the same Friday.
-function checkConflicts() {
+// ─── REUSABLE MONTH RANGE HELPERS ───────────────────────────
+// Shared utilities for any feature that needs a 2-month range picker.
+// Reads ONLY the date header row (row 2) — not the entire sheet — for speed.
+
+/**
+ * Read only the date header row and derive paired 2-month ranges.
+ * Returns { pairs: [{label, startMonth, startYear, endMonth, endYear}], error: string|null }
+ * Fast: reads a single row instead of getDataRange().getValues().
+ */
+function getScheduleMonthPairs_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
-  if (!sheet) {
-    SpreadsheetApp.getUi().alert("Schedule sheet not found. Run Full Setup first.");
-    return;
-  }
+  if (!sheet) return { pairs: [], error: "Schedule sheet not found. Run Full Setup first." };
 
-  const data = sheet.getDataRange().getValues();
-  if (data.length < 3 || data[0].length < 2) return;
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 2) return { pairs: [], error: "No dates found on the Schedule sheet." };
 
-  const dateHeaderRow = data[1];
-  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  
-  // Extract unique Month Year combinations
-  const options = [];
+  // Read ONLY row 2 (date headers) — much faster than getDataRange()
+  const dateHeaderRow = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+                      "July", "August", "September", "October", "November", "December"];
+
+  // Extract unique Month-Year labels
+  const months = [];
   const seen = new Set();
-  for (let c = 1; c < dateHeaderRow.length; c++) {
-    const d = dateHeaderRow[c];
+  for (let i = 0; i < dateHeaderRow.length; i++) {
+    const d = dateHeaderRow[i];
     if (d instanceof Date) {
       const label = monthNames[d.getMonth()] + " " + d.getFullYear();
       if (!seen.has(label)) {
-        options.push(label);
+        months.push({ label: label, month: d.getMonth(), year: d.getFullYear() });
         seen.add(label);
       }
     }
   }
 
-  // If there's only one month, just run it immediately
-  if (options.length <= 1) {
-    runConflictCheck_("all");
+  if (months.length === 0) return { pairs: [], error: "No dates found on the Schedule sheet." };
+
+  // Build paired options: each starting month + next month
+  const pairs = [];
+  for (let i = 0; i < months.length; i++) {
+    const start = months[i];
+    const next = (i + 1 < months.length) ? months[i + 1] : null;
+    if (next) {
+      pairs.push({
+        label: start.label + " – " + next.label,
+        startMonth: start.month, startYear: start.year,
+        endMonth: next.month, endYear: next.year
+      });
+    } else {
+      pairs.push({
+        label: start.label + " (single month)",
+        startMonth: start.month, startYear: start.year,
+        endMonth: start.month, endYear: start.year
+      });
+    }
+  }
+
+  return { pairs: pairs, error: null };
+}
+
+/**
+ * Show a reusable 2-month range picker dialog.
+ * @param {string} title - Dialog window title
+ * @param {string} labelText - Prompt label shown above the dropdown
+ * @param {string} hint - Smaller hint text (or "" to hide)
+ * @param {string} buttonLabel - Text on the action button
+ * @param {string} serverCallback - Name of the server-side function to call with (pairedIndex)
+ * @param {boolean} includeAllOption - If true, adds a "Check Entire Schedule" option at index -1
+ */
+function showMonthRangeDialog_(title, labelText, hint, buttonLabel, serverCallback, includeAllOption) {
+  const result = getScheduleMonthPairs_();
+  if (result.error) {
+    SpreadsheetApp.getUi().alert(result.error);
     return;
   }
 
-  // Create a clean, modern HTML modal for the dropdown
+  const pairs = result.pairs;
+  const allOptionHtml = includeAllOption
+    ? '<option value="-1">Check Entire Schedule</option>'
+    : '';
+  const optionsHtml = pairs.map((opt, i) =>
+    '<option value="' + i + '">' + opt.label + '</option>'
+  ).join('');
+  const hintHtml = hint ? '<p class="hint">' + hint + '</p>' : '';
+
   const html = `
     <!DOCTYPE html>
     <html>
@@ -1203,44 +1251,51 @@ function checkConflicts() {
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <style>
         * { box-sizing: border-box; }
-        body { 
-          margin: 0; padding: 24px; 
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+        body {
+          margin: 0; padding: 24px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           background-color: #ffffff; color: #3c4043;
           overflow: hidden;
         }
         .label { font-size: 14px; font-weight: 500; margin-bottom: 12px; display: block; }
-        select { 
-          width: 100%; height: 40px; padding: 0 12px; border-radius: 4px; border: 1px solid #dadce0; 
+        .hint  { font-size: 12px; color: #80868b; margin-bottom: 16px; margin-top: 0; }
+        select {
+          width: 100%; height: 40px; padding: 0 12px; border-radius: 4px; border: 1px solid #dadce0;
           font-size: 14px; background-color: #fff; outline: none; transition: border 0.2s;
           cursor: pointer; -webkit-appearance: none; -moz-appearance: none;
         }
         select:focus { border: 2px solid #1a73e8; }
-        .buttons { display: flex; justify-content: flex-end; gap: 12px; margin-top: 32px; }
-        button { 
-          height: 36px; padding: 0 24px; border-radius: 4px; font-size: 14px; font-weight: 500; 
+        .buttons { display: flex; justify-content: flex-end; gap: 12px; margin-top: 28px; }
+        button {
+          height: 36px; padding: 0 24px; border-radius: 4px; font-size: 14px; font-weight: 500;
           cursor: pointer; border: 1px solid transparent; transition: background 0.2s;
         }
         .btn-cancel { background: none; color: #1a73e8; border: 1px solid #dadce0; }
         .btn-cancel:hover { background-color: #f8f9fa; }
-        .btn-check { background-color: #1a73e8; color: #ffffff; }
-        .btn-check:hover { background-color: #1b66c9; box-shadow: 0 1px 2px 0 rgba(60,64,67,0.302), 0 1px 3px 1px rgba(60,64,67,0.149); }
+        .btn-action { background-color: #1a73e8; color: #ffffff; }
+        .btn-action:hover { background-color: #1b66c9; box-shadow: 0 1px 2px 0 rgba(60,64,67,0.302), 0 1px 3px 1px rgba(60,64,67,0.149); }
       </style>
     </head>
     <body>
-      <label class="label" for="period">Select period to analyze:</label>
-      <select id="period">
-        <option value="all">Check Entire Schedule</option>
-        ${options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+      <label class="label" for="rangeSelect">${labelText}</label>
+      ${hintHtml}
+      <select id="rangeSelect">
+        ${allOptionHtml}
+        ${optionsHtml}
       </select>
       <div class="buttons">
         <button class="btn-cancel" onclick="google.script.host.close()">Cancel</button>
-        <button class="btn-check" onclick="startCheck()">Check Now</button>
+        <button class="btn-action" onclick="doAction()">${buttonLabel}</button>
       </div>
       <script>
-        function startCheck() {
-          const val = document.getElementById('period').value;
-          google.script.run.withSuccessHandler(() => google.script.host.close()).runConflictCheck(val);
+        function doAction() {
+          var btn = document.querySelector('.btn-action');
+          btn.disabled = true; btn.textContent = 'Working…';
+          var idx = parseInt(document.getElementById('rangeSelect').value);
+          google.script.run
+            .withSuccessHandler(function() { google.script.host.close(); })
+            .withFailureHandler(function(e) { btn.disabled = false; btn.textContent = '${buttonLabel}'; alert(e.message); })
+            .${serverCallback}(idx);
         }
       </script>
     </body>
@@ -1248,34 +1303,64 @@ function checkConflicts() {
   `;
 
   const userInterface = HtmlService.createHtmlOutput(html)
-    .setWidth(400)
-    .setHeight(200)
-    .setTitle("Conflict Checker");
-    
-  SpreadsheetApp.getUi().showModalDialog(userInterface, " ");
+    .setWidth(420)
+    .setHeight(hint ? 230 : 200)
+    .setTitle(title);
+
+  SpreadsheetApp.getUi().showModalDialog(userInterface, title);
+}
+
+// ─── CONFLICT CHECKER ───────────────────────────────────────
+// Scans the Schedule sheet and reports all ministers who are
+// booked into multiple roles on the same Friday.
+function checkConflicts() {
+  showMonthRangeDialog_(
+    "⚠️ Conflict Checker",
+    "Select period to analyze:",
+    "",
+    "Check Now",
+    "runConflictCheck",
+    true  // include "Check Entire Schedule" option
+  );
 }
 
 /**
- * Server-side function called by the HTML dialog
+ * Server-side function called by the dialog.
+ * pairedIndex: -1 means "all", otherwise the index into the paired month ranges.
  */
-function runConflictCheck(filter) {
+function runConflictCheck(pairedIndex) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
   const data = sheet.getDataRange().getValues();
-  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-  
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+                      "July", "August", "September", "October", "November", "December"];
+
+  // Determine which months to include
+  let chosen = null;
+  let filterLabel = "the entire schedule";
+  if (pairedIndex >= 0) {
+    const result = getScheduleMonthPairs_();
+    if (result.error || pairedIndex >= result.pairs.length) return;
+    chosen = result.pairs[pairedIndex];
+    filterLabel = chosen.label;
+  }
+
   const allConflicts = [];
   const numRows = data.length;
   const numCols = data[0].length;
 
   for (let c = 1; c < numCols; c++) {
     const dateHeader = data[1][c];
-    
-    // Filtering logic
-    if (filter !== "all") {
+
+    // Filtering logic — skip columns outside the chosen 2-month range
+    if (chosen) {
       if (dateHeader instanceof Date) {
-        const label = monthNames[dateHeader.getMonth()] + " " + dateHeader.getFullYear();
-        if (label !== filter) continue;
+        const m = dateHeader.getMonth();
+        const y = dateHeader.getFullYear();
+        const inRange =
+          (y === chosen.startYear && m === chosen.startMonth) ||
+          (y === chosen.endYear && m === chosen.endMonth);
+        if (!inRange) continue;
       } else {
         continue;
       }
@@ -1293,10 +1378,10 @@ function runConflictCheck(filter) {
 
     for (const [name, roles] of Object.entries(nameCount)) {
       if (roles.length >= 2) {
-        let dateStr = (dateHeader instanceof Date) 
+        let dateStr = (dateHeader instanceof Date)
           ? Utilities.formatDate(dateHeader, ss.getSpreadsheetTimeZone(), "MMM d, yyyy")
           : String(dateHeader);
-          
+
         allConflicts.push({
           date: dateStr,
           name: name,
@@ -1309,12 +1394,12 @@ function runConflictCheck(filter) {
 
   const ui = SpreadsheetApp.getUi();
   if (allConflicts.length === 0) {
-    ui.alert("✅ No Conflicts", "No conflicts found for " + (filter === "all" ? "the entire schedule" : filter) + ".", ui.ButtonSet.OK);
+    ui.alert("✅ No Conflicts", "No conflicts found for " + filterLabel + ".", ui.ButtonSet.OK);
     return;
   }
 
   allConflicts.sort((a, b) => b.count - a.count || a.date.localeCompare(b.date));
-  let report = "Found " + allConflicts.length + " conflict(s) in " + (filter === "all" ? "the entire schedule" : filter) + ":\n\n";
+  let report = "Found " + allConflicts.length + " conflict(s) in " + filterLabel + ":\n\n";
 
   allConflicts.forEach(c => {
     const severity = c.count >= 3 ? "🔴" : "🟠";
@@ -1357,16 +1442,16 @@ function clearFormatting() {
 
   if (numRows > 2 && numCols > 1) {
     const dataRange = sheet.getRange(3, 2, numRows - 2, numCols - 1);
-    
+
     // Clear conditional format rules (removes conflict/fatigue indicators)
     sheet.clearConditionalFormatRules();
-    
+
     // Set background to alternating zebra stripes
     for (let r = 3; r <= numRows; r++) {
       const bg = (r % 2 !== 0) ? "#f8f9fa" : "#ffffff";
       sheet.getRange(r, 2, 1, numCols - 1).setBackground(bg);
     }
-    
+
     // Ensure font color is black and not bold
     dataRange.setFontColor("#000000");
     dataRange.setFontWeight("normal");
@@ -1377,183 +1462,41 @@ function clearFormatting() {
 
 // ─── PRINTING EXPORT ────────────────────────────────────────
 /**
- * Shows a modal dialog to select a 2-month range for printing.
- * The user picks a starting month and the print covers that month + the next.
+ * Shows the shared 2-month range picker, then generates the print sheet.
  * Hidden rows (from group filtering) are automatically excluded.
  */
 function exportForPrinting() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
-  if (!sheet) {
-    SpreadsheetApp.getUi().alert("Schedule sheet not found. Run Full Setup first.");
-    return;
-  }
-
-  const data = sheet.getDataRange().getValues();
-  const dateHeaderRow = data[1]; // Row 2 contains dates
-  const monthNames = ["January", "February", "March", "April", "May", "June",
-                      "July", "August", "September", "October", "November", "December"];
-
-  // Extract unique Month-Year labels from the date header
-  const options = [];
-  const seen = new Set();
-  for (let c = 1; c < dateHeaderRow.length; c++) {
-    const d = dateHeaderRow[c];
-    if (d instanceof Date) {
-      const label = monthNames[d.getMonth()] + " " + d.getFullYear();
-      if (!seen.has(label)) {
-        options.push({ label: label, month: d.getMonth(), year: d.getFullYear() });
-        seen.add(label);
-      }
-    }
-  }
-
-  if (options.length === 0) {
-    SpreadsheetApp.getUi().alert("No dates found on the Schedule sheet.");
-    return;
-  }
-
-  // Build the paired options: each starting month + next month
-  const pairedOptions = [];
-  for (let i = 0; i < options.length; i++) {
-    const startOpt = options[i];
-    // Find the next month that exists in the schedule
-    const nextOpt = (i + 1 < options.length) ? options[i + 1] : null;
-    if (nextOpt) {
-      pairedOptions.push({
-        label: startOpt.label + " – " + nextOpt.label,
-        startMonth: startOpt.month,
-        startYear: startOpt.year,
-        endMonth: nextOpt.month,
-        endYear: nextOpt.year
-      });
-    } else {
-      // Last month available — single month print
-      pairedOptions.push({
-        label: startOpt.label + " (single month)",
-        startMonth: startOpt.month,
-        startYear: startOpt.year,
-        endMonth: startOpt.month,
-        endYear: startOpt.year
-      });
-    }
-  }
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <style>
-        * { box-sizing: border-box; }
-        body {
-          margin: 0; padding: 24px;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-          background-color: #ffffff; color: #3c4043;
-          overflow: hidden;
-        }
-        .label { font-size: 14px; font-weight: 500; margin-bottom: 12px; display: block; }
-        .hint  { font-size: 12px; color: #80868b; margin-bottom: 16px; }
-        select {
-          width: 100%; height: 40px; padding: 0 12px; border-radius: 4px; border: 1px solid #dadce0;
-          font-size: 14px; background-color: #fff; outline: none; transition: border 0.2s;
-          cursor: pointer; -webkit-appearance: none; -moz-appearance: none;
-        }
-        select:focus { border: 2px solid #1a73e8; }
-        .buttons { display: flex; justify-content: flex-end; gap: 12px; margin-top: 28px; }
-        button {
-          height: 36px; padding: 0 24px; border-radius: 4px; font-size: 14px; font-weight: 500;
-          cursor: pointer; border: 1px solid transparent; transition: background 0.2s;
-        }
-        .btn-cancel { background: none; color: #1a73e8; border: 1px solid #dadce0; }
-        .btn-cancel:hover { background-color: #f8f9fa; }
-        .btn-print { background-color: #1a73e8; color: #ffffff; }
-        .btn-print:hover { background-color: #1b66c9; box-shadow: 0 1px 2px 0 rgba(60,64,67,0.302), 0 1px 3px 1px rgba(60,64,67,0.149); }
-      </style>
-    </head>
-    <body>
-      <label class="label" for="range">Select 2-month range to print:</label>
-      <p class="hint">Hidden rows (filtered groups) will be excluded automatically.</p>
-      <select id="range">
-        ${pairedOptions.map((opt, i) => '<option value="' + i + '">' + opt.label + '</option>').join('')}
-      </select>
-      <div class="buttons">
-        <button class="btn-cancel" onclick="google.script.host.close()">Cancel</button>
-        <button class="btn-print" onclick="startPrint()">🖨 Generate Print Sheet</button>
-      </div>
-      <script>
-        function startPrint() {
-          const idx = parseInt(document.getElementById('range').value);
-          google.script.run
-            .withSuccessHandler(function() { google.script.host.close(); })
-            .runPrintRange(idx);
-        }
-      </script>
-    </body>
-    </html>
-  `;
-
-  const userInterface = HtmlService.createHtmlOutput(html)
-    .setWidth(420)
-    .setHeight(230)
-    .setTitle("Print Range");
-
-  SpreadsheetApp.getUi().showModalDialog(userInterface, "🖨 Export for Printing");
+  showMonthRangeDialog_(
+    "🖨 Export for Printing",
+    "Select 2-month range to print:",
+    "Hidden rows (filtered groups) will be excluded automatically.",
+    "🖨 Generate Print Sheet",
+    "runPrintRange",
+    false  // no "all" option for printing
+  );
 }
 
 /**
  * Server-side function called by the print dialog.
- * Receives the index of the selected paired option, re-derives the months,
- * and generates the print sheet.
+ * Uses the shared getScheduleMonthPairs_() helper instead of re-deriving months.
  */
 function runPrintRange(pairedIndex) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
   if (!sheet) return;
 
-  const data = sheet.getDataRange().getValues();
-  const dateHeaderRow = data[1];
-  const monthNames = ["January", "February", "March", "April", "May", "June",
-                      "July", "August", "September", "October", "November", "December"];
+  const result = getScheduleMonthPairs_();
+  if (result.error || pairedIndex < 0 || pairedIndex >= result.pairs.length) return;
+  const chosen = result.pairs[pairedIndex];
 
-  // Re-derive the paired options (same logic as exportForPrinting)
-  const options = [];
-  const seen = new Set();
-  for (let c = 1; c < dateHeaderRow.length; c++) {
-    const d = dateHeaderRow[c];
-    if (d instanceof Date) {
-      const label = monthNames[d.getMonth()] + " " + d.getFullYear();
-      if (!seen.has(label)) {
-        options.push({ label: label, month: d.getMonth(), year: d.getFullYear() });
-        seen.add(label);
-      }
-    }
-  }
-
-  const pairedOptions = [];
-  for (let i = 0; i < options.length; i++) {
-    const startOpt = options[i];
-    const nextOpt = (i + 1 < options.length) ? options[i + 1] : null;
-    if (nextOpt) {
-      pairedOptions.push({
-        startMonth: startOpt.month, startYear: startOpt.year,
-        endMonth: nextOpt.month, endYear: nextOpt.year
-      });
-    } else {
-      pairedOptions.push({
-        startMonth: startOpt.month, startYear: startOpt.year,
-        endMonth: startOpt.month, endYear: startOpt.year
-      });
-    }
-  }
-
-  if (pairedIndex < 0 || pairedIndex >= pairedOptions.length) return;
-  const chosen = pairedOptions[pairedIndex];
+  // Read only the date header row to find matching columns
+  const lastCol = sheet.getLastColumn();
+  const dateHeaderRow = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
 
   // Determine which columns (dates) fall within the chosen range
   const colIndices = []; // 1-based column indices on the sheet
-  for (let c = 1; c < dateHeaderRow.length; c++) {
-    const d = dateHeaderRow[c];
+  for (let i = 0; i < dateHeaderRow.length; i++) {
+    const d = dateHeaderRow[i];
     if (d instanceof Date) {
       const m = d.getMonth();
       const y = d.getFullYear();
@@ -1561,7 +1504,7 @@ function runPrintRange(pairedIndex) {
         (y === chosen.startYear && m === chosen.startMonth) ||
         (y === chosen.endYear && m === chosen.endMonth);
       if (inRange) {
-        colIndices.push(c + 1); // +1 because data array is 0-based but sheet is 1-based
+        colIndices.push(i + 2); // +2: 0-based array offset + column 1 is roles
       }
     }
   }
