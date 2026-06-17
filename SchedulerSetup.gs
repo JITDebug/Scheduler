@@ -10,6 +10,7 @@ const CONFIG = {
   roleGroupsSheetName: "Role Groups",
   rolesSheetName: "Roles",
   vacationsSheetName: "Vacations",
+  eventsSheetName: "Events",
   // Starting Friday – change to whatever date you need.
   // Format: year, month (0‑based!), day
   startFriday: new Date(2026, 4, 8),   // May 8 2026 (Friday)
@@ -159,6 +160,7 @@ function onOpen() {
   ui.createMenu("⚙️ Configs")
     .addItem("🛠 Create/Repair Settings Sheet", "initializeSettingsSheet")
     .addItem("🏖 Create/Repair Vacations Sheet", "initializeVacationsSheet")
+    .addItem("🎉 Create/Repair Events Sheet", "initializeEventsSheet")
     .addItem("⚙️ Full Setup (WARNING: DELETES ALL DATA)", "setupScheduler")
     .addToUi();
 
@@ -176,6 +178,7 @@ function onOpen() {
     .addSeparator()
     .addItem("👥 Update Minister Dropdowns",    "refreshAllDropdowns")
     .addItem("🔄 Sync New/Removed Roles",      "syncRoles")
+    .addItem("🎉 Sync New/Removed Events",     "syncEvents")
     .addToUi();
 }
 
@@ -184,7 +187,7 @@ function setupScheduler() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
     "Setup Scheduler",
-    "This will create / overwrite the Schedule, Ministers, Roles, Vacations, and Role Groups sheets.\nContinue?",
+    "This will create / overwrite the Schedule, Ministers, Roles, Vacations, Events, Settings, and Role Groups sheets.\nContinue?",
     ui.ButtonSet.YES_NO
   );
   if (response !== ui.Button.YES) return;
@@ -216,11 +219,18 @@ function setupScheduler() {
   if (vacationsSheet) { vacationsSheet.getRange(1, 1, vacationsSheet.getMaxRows(), vacationsSheet.getMaxColumns()).clearDataValidations(); vacationsSheet.clear(); }
   else vacationsSheet = ss.insertSheet(CONFIG.vacationsSheetName);
 
+  let eventsSheet = ss.getSheetByName(CONFIG.eventsSheetName);
+  if (eventsSheet) { eventsSheet.getRange(1, 1, eventsSheet.getMaxRows(), eventsSheet.getMaxColumns()).clearDataValidations(); eventsSheet.clear(); }
+  else eventsSheet = ss.insertSheet(CONFIG.eventsSheetName);
+
   // 2. Build Settings sheet
   buildSettingsSheet_(settingsSheet);
 
   // 2.5 Build Vacations sheet
   buildVacationsSheet_(vacationsSheet);
+
+  // 2.6 Build Events sheet
+  buildEventsSheet_(eventsSheet);
 
   // 3. Build Roles sheet first (source of truth)
   buildRolesSheet_(rolesSheet);
@@ -234,6 +244,7 @@ function setupScheduler() {
 
   // 5. Build Schedule sheet
   buildScheduleSheet_(scheduleSheet);
+  applyEventHeadersToSchedule_();
 
   // 6. Apply formatting
   applyFormatting();
@@ -254,6 +265,7 @@ function setupScheduler() {
     "• Edit the Ministers sheet to manage people and role eligibility.\n" +
     "• Edit the Role Groups sheet to organize roles into groups.\n" +
     "• Edit the Vacations sheet to track unavailabilities.\n" +
+    "• Edit the Events sheet to highlight schedule date headers.\n" +
     "• Run Scheduler ▸ Sync Roles after changing the Roles sheet.\n" +
     "• Dropdowns auto‑update when you change the Ministers sheet."
   );
@@ -679,6 +691,120 @@ function generateFridays_(startDate, count) {
   return fridays;
 }
 
+const SCHEDULE_HEADER_DATE_NOTE_PREFIX_ = "SCHEDULER_DATE:";
+
+function dateKey_(date) {
+  return Utilities.formatDate(date, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), "yyyy-MM-dd");
+}
+
+function parseDateKey_(key) {
+  const parts = String(key || "").split("-");
+  if (parts.length !== 3) return null;
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function getHeaderDate_(value, note) {
+  if (value instanceof Date && !isNaN(value)) return value;
+  if (typeof note === "string" && note.indexOf(SCHEDULE_HEADER_DATE_NOTE_PREFIX_) === 0) {
+    return parseDateKey_(note.replace(SCHEDULE_HEADER_DATE_NOTE_PREFIX_, "").trim());
+  }
+  return null;
+}
+
+function getScheduleHeaderDates_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 2) return [];
+
+  const values = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
+  const notes = sheet.getRange(2, 2, 1, lastCol - 1).getNotes()[0];
+  return values.map((value, i) => getHeaderDate_(value, notes[i]));
+}
+
+function getEventsByDate_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.eventsSheetName);
+  const eventsByDate = {};
+  if (!sheet || sheet.getLastRow() < 2) return eventsByDate;
+
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  data.forEach(row => {
+    const eventName = row[0];
+    const eventDate = row[1];
+    if (!eventName || !(eventDate instanceof Date) || isNaN(eventDate)) return;
+
+    const key = dateKey_(eventDate);
+    const label = String(eventName).trim();
+    if (!label) return;
+    if (!eventsByDate[key]) eventsByDate[key] = [];
+    eventsByDate[key].push(label);
+  });
+
+  return eventsByDate;
+}
+
+function applyEventHeadersToSchedule_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
+  if (!sheet || sheet.getLastColumn() < 2) return;
+
+  const dates = getScheduleHeaderDates_(sheet);
+  if (dates.length === 0) return;
+
+  const dateRange = sheet.getRange(2, 2, 1, dates.length);
+  dateRange.setValues([dates])
+    .setNumberFormat("MMM d")
+    .setFontWeight("bold")
+    .setFontSize(10)
+    .setBackground("#1a73e8")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle")
+    .setWrap(false);
+  dateRange.setNotes([dates.map(d => d ? SCHEDULE_HEADER_DATE_NOTE_PREFIX_ + dateKey_(d) : "")]);
+
+  const eventsByDate = getEventsByDate_();
+  let hasEvent = false;
+
+  dates.forEach((date, i) => {
+    if (!date) return;
+
+    const eventNames = eventsByDate[dateKey_(date)];
+    if (!eventNames || eventNames.length === 0) return;
+
+    hasEvent = true;
+    const dateText = Utilities.formatDate(date, ss.getSpreadsheetTimeZone(), "MMM d");
+    const eventText = eventNames.join(" / ").toUpperCase();
+    const headerText = dateText + "\n" + eventText;
+    const dateStyle = SpreadsheetApp.newTextStyle().setBold(true).setFontSize(10).build();
+    const eventStyle = SpreadsheetApp.newTextStyle().setBold(true).setFontSize(8).build();
+    const richText = SpreadsheetApp.newRichTextValue()
+      .setText(headerText)
+      .setTextStyle(0, dateText.length, dateStyle)
+      .setTextStyle(dateText.length + 1, headerText.length, eventStyle)
+      .build();
+
+    sheet.getRange(2, i + 2)
+      .setRichTextValue(richText)
+      .setBackground("#185abc")
+      .setFontColor("#ffffff")
+      .setHorizontalAlignment("center")
+      .setVerticalAlignment("middle")
+      .setWrap(true)
+      .setNote(SCHEDULE_HEADER_DATE_NOTE_PREFIX_ + dateKey_(date));
+  });
+
+  sheet.setRowHeight(2, hasEvent ? 44 : 36);
+}
+
+function syncEvents() {
+  applyEventHeadersToSchedule_();
+  SpreadsheetApp.getActiveSpreadsheet().toast("Events synced ✅", "Scheduler", 3);
+}
+
 // ─── REFRESH DROPDOWNS ─────────────────────────────────────
 // Reads the Ministers sheet and rebuilds data‑validation dropdowns
 // on the Schedule sheet so each role only shows eligible ministers.
@@ -734,6 +860,7 @@ function refreshAllDropdowns() {
 
   // Read schedule structure
   const scheduleData = scheduleSheet.getDataRange().getValues();
+  const scheduleHeaderNotes = scheduleSheet.getRange(2, 1, 1, scheduleSheet.getLastColumn()).getNotes()[0];
   const numCols = scheduleData[0].length;
   if (numCols < 2) return;
 
@@ -746,9 +873,9 @@ function refreshAllDropdowns() {
   }
 
   for (let c = 1; c < numCols; c++) {
-    const cellVal = scheduleData[1][c];
-    if (cellVal instanceof Date && !isHidden[c]) {
-      const d = new Date(cellVal);
+    const headerDate = getHeaderDate_(scheduleData[1][c], scheduleHeaderNotes[c]);
+    if (headerDate && !isHidden[c]) {
+      const d = new Date(headerDate);
       d.setHours(12,0,0,0);
       scheduleDates[c] = d.getTime();
     } else {
@@ -764,7 +891,9 @@ function refreshAllDropdowns() {
     role = role.trim();
     if (!validRoles.includes(role)) {
       // Actively scrub orphaned notes and validations from non-role rows!
-      scheduleSheet.getRange(r + 1, 2, 1, numCols - 1).clearDataValidations().clearNote();
+      const nonRoleRange = scheduleSheet.getRange(r + 1, 2, 1, numCols - 1);
+      nonRoleRange.clearDataValidations();
+      if (r >= 2) nonRoleRange.clearNote();
       continue;
     }
 
@@ -961,7 +1090,7 @@ function addMonth() {
   if (!sheet) return;
 
   const lastCol = sheet.getLastColumn();
-  const lastDate = sheet.getRange(2, lastCol).getValue();
+  const lastDate = getHeaderDate_(sheet.getRange(2, lastCol).getValue(), sheet.getRange(2, lastCol).getNote());
 
   let nextFriday;
   if (lastDate instanceof Date) {
@@ -1033,6 +1162,8 @@ function addMonth() {
     }
   }
   if (count > 1) sheet.getRange(1, startCol, 1, count).mergeAcross();
+
+  applyEventHeadersToSchedule_();
 
   // Refresh dropdowns to cover new columns
   refreshAllDropdowns();
@@ -1212,12 +1343,14 @@ function applyFormatting() {
 }
 
 // ─── AUTO‑UPDATE TRIGGER ────────────────────────────────────
-// When the Ministers or Vacations sheet is edited, automatically refresh dropdowns.
+// When setup sheets are edited, automatically refresh the dependent schedule areas.
 function onEditTrigger(e) {
   try {
     const sheetName = e.source.getActiveSheet().getName();
     if (sheetName === CONFIG.ministersSheetName || sheetName === CONFIG.vacationsSheetName) {
       refreshAllDropdowns();
+    } else if (sheetName === CONFIG.eventsSheetName) {
+      applyEventHeadersToSchedule_();
     }
   } catch (err) {
     // Silently ignore trigger errors
@@ -1319,7 +1452,7 @@ function runArchiveActionByVal(month, year, action) {
   const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
   
   const lastCol = sheet.getLastColumn();
-  const dateHeaderRow = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
+  const dateHeaderRow = getScheduleHeaderDates_(sheet);
 
   let startCol = -1;
   let count = 0;
@@ -1329,7 +1462,7 @@ function runArchiveActionByVal(month, year, action) {
     const d = dateHeaderRow[i];
     let isTarget = false;
     
-    if (d instanceof Date && d.getMonth() === month && d.getFullYear() === year) {
+    if (d && d.getMonth() === month && d.getFullYear() === year) {
       if (action === 'archive' && !sheet.isColumnHiddenByUser(i + 2)) isTarget = true;
       if (action === 'unarchive' && sheet.isColumnHiddenByUser(i + 2)) isTarget = true;
     }
@@ -1376,7 +1509,7 @@ function getAllScheduleMonths_() {
   const lastCol = sheet.getLastColumn();
   if (lastCol < 2) return { months: [], error: "No dates found." };
 
-  const dateHeaderRow = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
+  const dateHeaderRow = getScheduleHeaderDates_(sheet);
   const monthNames = ["January", "February", "March", "April", "May", "June",
                       "July", "August", "September", "October", "November", "December"];
 
@@ -1390,7 +1523,7 @@ function getAllScheduleMonths_() {
 
   for (let i = 0; i < dateHeaderRow.length; i++) {
     const d = dateHeaderRow[i];
-    if (d instanceof Date) {
+    if (d) {
       const label = monthNames[d.getMonth()] + " " + d.getFullYear();
       if (!monthMap.has(label)) {
         monthMap.set(label, { label: label, month: d.getMonth(), year: d.getFullYear(), visibleCount: 0, hiddenCount: 0 });
@@ -1424,7 +1557,7 @@ function getScheduleMonthPairs_() {
   if (lastCol < 2) return { pairs: [], error: "No dates found on the Schedule sheet." };
 
   // Read ONLY row 2 (date headers) — much faster than getDataRange()
-  const dateHeaderRow = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
+  const dateHeaderRow = getScheduleHeaderDates_(sheet);
   const monthNames = ["January", "February", "March", "April", "May", "June",
                       "July", "August", "September", "October", "November", "December"];
 
@@ -1442,7 +1575,7 @@ function getScheduleMonthPairs_() {
     if (isHidden[i]) continue; // Skip archived columns
 
     const d = dateHeaderRow[i];
-    if (d instanceof Date) {
+    if (d) {
       const label = monthNames[d.getMonth()] + " " + d.getFullYear();
       if (!seen.has(label)) {
         months.push({ label: label, month: d.getMonth(), year: d.getFullYear() });
@@ -1589,6 +1722,7 @@ function runConflictCheck(pairedIndex) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
   const data = sheet.getDataRange().getValues();
+  const headerNotes = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getNotes()[0];
   const monthNames = ["January", "February", "March", "April", "May", "June",
                       "July", "August", "September", "October", "November", "December"];
 
@@ -1615,11 +1749,11 @@ function runConflictCheck(pairedIndex) {
   for (let c = 1; c < numCols; c++) {
     if (isHidden[c]) continue; // Ignore archived/hidden weeks
 
-    const dateHeader = data[1][c];
+    const dateHeader = getHeaderDate_(data[1][c], headerNotes[c]);
 
     // Filtering logic — skip columns outside the chosen 2-month range
     if (chosen) {
-      if (dateHeader instanceof Date) {
+      if (dateHeader) {
         const m = dateHeader.getMonth();
         const y = dateHeader.getFullYear();
         const inRange =
@@ -1643,7 +1777,7 @@ function runConflictCheck(pairedIndex) {
 
     for (const [name, roles] of Object.entries(nameCount)) {
       if (roles.length >= 2) {
-        let dateStr = (dateHeader instanceof Date)
+        let dateStr = (dateHeader)
           ? Utilities.formatDate(dateHeader, ss.getSpreadsheetTimeZone(), "MMM d, yyyy")
           : String(dateHeader);
 
@@ -1758,7 +1892,7 @@ function runPrintRange(pairedIndex) {
 
   // Read only the date header row to find matching columns
   const lastCol = sheet.getLastColumn();
-  const dateHeaderRow = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
+  const dateHeaderRow = getScheduleHeaderDates_(sheet);
 
   // Determine which columns (dates) fall within the chosen range
   const colIndices = []; // 1-based column indices on the sheet
@@ -1773,7 +1907,7 @@ function runPrintRange(pairedIndex) {
     if (isHidden[i]) continue; // Ignore archived weeks
 
     const d = dateHeaderRow[i];
-    if (d instanceof Date) {
+    if (d) {
       const m = d.getMonth();
       const y = d.getFullYear();
       const inRange =
@@ -1936,7 +2070,8 @@ function generatePrintableFromRange_(srcSheet, rows, cols) {
 
   // 4.5. Re-apply merges in Row 1 of the print sheet (Monthly Theme)
   if (numCols > 2 && values.length > 1) {
-    const printDates = values[1].slice(1);
+    const sourceHeaderNotes = srcSheet.getRange(2, 1, 1, srcSheet.getLastColumn()).getNotes()[0];
+    const printDates = cols.slice(1).map(col => getHeaderDate_(srcSheet.getRange(2, col).getValue(), sourceHeaderNotes[col - 1]));
     let currentMonth = -1;
     let startCol = 2;
     let count = 0;
@@ -2101,4 +2236,64 @@ function buildVacationsSheet_(sheet) {
   sheet.getRange("E2").setValue("Add minister vacations here. They will be removed from dropdowns for dates within their vacation period.").setFontColor("#666666").setFontStyle("italic");
   sheet.getRange("E3").setValue("Start Date and End Date must be valid dates (e.g. 5/14/2026).").setFontColor("#666666").setFontStyle("italic");
   sheet.getRange("E4").setValue("Make sure to run Scheduler ▸ Update Minister Dropdowns after adding vacations!").setFontColor("#666666").setFontStyle("italic");
+}
+
+function initializeEventsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(CONFIG.eventsSheetName || "Events");
+  let existingEvents = [];
+  if (sheet) {
+    if (sheet.getLastRow() > 1) {
+      existingEvents = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues()
+        .filter(row => row[0] !== "" || row[1] !== "");
+    }
+    sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations();
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet(CONFIG.eventsSheetName || "Events");
+  }
+
+  buildEventsSheet_(sheet);
+  if (existingEvents.length > 0) {
+    sheet.getRange(2, 1, existingEvents.length, 2).setValues(existingEvents);
+  }
+  applyEventHeadersToSchedule_();
+  ss.setActiveSheet(sheet);
+  ss.toast("Events sheet created/repaired! ✅", "Scheduler", 3);
+}
+
+function buildEventsSheet_(sheet) {
+  sheet.appendRow(["Event Name", "Date", "", "ℹ️ Instructions"]);
+
+  const headerRange = sheet.getRange(1, 1, 1, 4);
+  headerRange
+    .setFontWeight("bold")
+    .setBackground("#455a64")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center");
+
+  sheet.setColumnWidth(1, 220);
+  sheet.setColumnWidth(2, 130);
+  sheet.setColumnWidth(3, 50);
+  sheet.setColumnWidth(4, 520);
+  sheet.setFrozenRows(1);
+
+  const dateRule = SpreadsheetApp.newDataValidation()
+    .requireDate()
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange("B2:B").setDataValidation(dateRule).setNumberFormat("mmm d, yyyy");
+
+  sheet.getRange("D2")
+    .setValue("Add events here. If an event date matches a Schedule date, that date header will show the date and event name.")
+    .setFontColor("#666666")
+    .setFontStyle("italic");
+  sheet.getRange("D3")
+    .setValue("Column A is the event name. Column B is the event date.")
+    .setFontColor("#666666")
+    .setFontStyle("italic");
+  sheet.getRange("D4")
+    .setValue("After editing events, the Schedule headers refresh automatically if the onEdit trigger is installed.")
+    .setFontColor("#666666")
+    .setFontStyle("italic");
 }

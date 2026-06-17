@@ -4,12 +4,13 @@ A powerful, automated scheduling system built with Google Apps Script for Google
 
 ## 🌟 Key Features
 
-- **Automated Setup**: Generates all necessary sheets (Schedule, Ministers, Roles, Role Groups, Settings) with a single click.
+- **Automated Setup**: Generates all necessary sheets (Schedule, Ministers, Roles, Role Groups, Settings, Vacations, Events) with a single click.
 - **Conflict Detection**: Built-in logic to prevent assigning the same person to multiple roles on the same day. Filterable by Year/Month.
 - **Ministry Group Filtering**: Easily toggle visibility between different groups (e.g., Music Ministry, Ushering, Children's Ministry).
 - **In-Cell Image Printing**: Export specific selections to a dedicated print sheet with custom header and footer branding.
 - **Zebra Striping**: Quickly strip formatting and apply a clean, high-readability "zebra stripe" pattern for printing.
 - **Dynamic Month Archiving**: Explicitly archive or unarchive targeted months. Archived months are excluded from all real-time evaluations (like conflict detection) to drastically improve Google Sheets performance.
+- **Event Headers**: Maintain an `Events` sheet so matching schedule dates show a two-line date and event name header.
 - **Dynamic Sync**: Add or remove roles/ministers and sync the dropdown menus across the entire schedule instantly.
 
 ## 🚀 Getting Started
@@ -25,13 +26,14 @@ A powerful, automated scheduling system built with Google Apps Script for Google
 1. In your Google Sheet, find the new **⚙️ Configs** menu.
 2. Select **⚙️ Full Setup (WARNING: DELETES ALL DATA)**.
 3. Authenticate the script when prompted.
-4. The script will generate 5 sheets: `Schedule`, `Ministers`, `Roles`, `Role Groups`, and `Settings`.
+4. The script will generate 7 sheets: `Schedule`, `Ministers`, `Roles`, `Role Groups`, `Settings`, `Vacations`, and `Events`.
 
 ### 3. Customization
 - **Ministers**: Add your team members and their eligible roles in the `Ministers` sheet.
 - **Roles**: List all roles in the `Roles` sheet.
 - **Groups**: Define which roles belong to which ministry in the `Role Groups` sheet.
 - **Settings**: Insert your church logo or banner into cells **B2** and **B3** (Insert ▸ Image ▸ Image in cell).
+- **Events**: Add event names in column A and event dates in column B. Matching Schedule headers will show the date plus event name.
 
 ## 🖨 How to Print
 1. Highlight the cells you want to print.
