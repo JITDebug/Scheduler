@@ -72,15 +72,23 @@ Here is a breakdown of every operational feature available in the **⏱ Schedule
     3. Show the user that `Technical Director` now has a new column in `Ministers` and a new row in `Schedule`, ready for assignments!
 *   **Key Talking Point:** *"Your team structures change. This sync tool updates your database structure seamlessly without risking your historical schedule data."*
 
-### 5. ➕ Add More Weeks
-*   **What it does:** Extends the schedule by adding 4 new Friday columns, automatically copying the formatting, monthly theme structure, date calculations, and smart dropdown validations.
+### 5. ➕ Add Month
+*   **What it does:** Extends the schedule by identifying the calendar month of the next available Friday, and dynamically appending all 4 or 5 Fridays to complete that month. Automatically copies formatting, theme structure, and smart validations.
 *   **How to Demo:** 
     1. Scroll to the far right of the `Schedule` sheet.
-    2. Click `⏱ Scheduler ▸ ➕ Add 4 More Weeks`.
-    3. Show how the calendar extends by a month with everything pre-configured.
-*   **Key Talking Point:** *"Never start a sheet from scratch. Seamlessly grow your scheduling cycle 4 weeks at a time."*
+    2. Click `⏱ Scheduler ▸ ➕ Add Month`.
+    3. Show how the calendar extends perfectly to the end of the newly calculated month.
+*   **Key Talking Point:** *"Never start a sheet from scratch, and never guess how many weeks are in the next month. The system calculates and appends the exact calendar month automatically."*
 
-### 6. 🖨 Custom Export for Printing
+### 6. 📦 Performance-Optimized Archiving
+*   **What it does:** Allows users to explicitly select a specific past month and 'Archive' it. This hides the columns from view and surgically excludes those columns from all background conflict detection engines and formatting logic, massively speeding up Google Sheets.
+*   **How to Demo:** 
+    1. Click `⏱ Scheduler ▸ 📦 Archive Month...`.
+    2. Select the oldest month in the dropdown and click Archive. Show how those columns instantly vanish.
+    3. Emphasize that because they are archived, they no longer slow down the sheet's conflict calculations.
+*   **Key Talking Point:** *"Historical data doesn't have to slow down your sheet. Granular archiving keeps your active schedule lightning fast while retaining all past data out of sight."*
+
+### 7. 🖨 Custom Export for Printing
 *   **What it does:** Copies the current view (respecting any group filters and date ranges) to a clean, isolated sheet, applying a beautiful header and footer template defined in the Settings sheet.
 *   **How to Demo:** 
     1. Filter the schedule to a specific group (e.g., `Music Ministry`).
@@ -110,7 +118,10 @@ Follow this sequence to deliver a high-impact, smooth demonstration on a pre-con
   [5. Export to PDF/Print] (Generate beautiful print layout sheet with 1 click)
          │
          ▼
-  [6. Add a New Role & Sync] (Add 'Video Editor' in Roles -> Sync to Ministers/Schedule)
+  [6. Archive a Month] (Show granular archiving to optimize performance)
+         │
+         ▼
+  [7. Add a New Role & Sync] (Add 'Video Editor' in Roles -> Sync to Ministers/Schedule)
 ```
 
 1.  **Introduce the Problem:** *"Scheduling volunteers is a manual nightmare of conflicting dates, vacations, and layout updates. Here is a pre-configured central sheet shared by our team."*
@@ -118,4 +129,5 @@ Follow this sequence to deliver a high-impact, smooth demonstration on a pre-con
 3.  **Create a Conflict & Fatigue:** Assign "David" to two roles on the same day. Point out the Orange warning. Assign him 3 weeks in a row to show the Red Text fatigue warning.
 4.  **Filter by Group:** Filter the screen to "Music Ministry". Point out how we instantly zoom in on one team's view.
 5.  **Export for Printing:** Click `🖨 Export for Printing`. Select the date range from the dialog and show the gorgeous printed sheet with headers/footers.
-6.  **Add a Role & Sync:** Add a new role "Video Editor" in the `Roles` sheet, run `🔄 Sync New/Removed Roles`, and show it appearing instantly as a new column in `Ministers` and a new row in `Schedule` without losing any of the existing assignments.
+6.  **Archive for Performance:** Click `📦 Archive Month...` and archive the oldest month. Explain how removing this historical data from the live calculation grid keeps the schedule lightning fast.
+7.  **Add a Role & Sync:** Add a new role "Video Editor" in the `Roles` sheet, run `🔄 Sync New/Removed Roles`, and show it appearing instantly as a new column in `Ministers` and a new row in `Schedule` without losing any of the existing assignments.

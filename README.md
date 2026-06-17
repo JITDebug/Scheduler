@@ -9,6 +9,7 @@ A powerful, automated scheduling system built with Google Apps Script for Google
 - **Ministry Group Filtering**: Easily toggle visibility between different groups (e.g., Music Ministry, Ushering, Children's Ministry).
 - **In-Cell Image Printing**: Export specific selections to a dedicated print sheet with custom header and footer branding.
 - **Zebra Striping**: Quickly strip formatting and apply a clean, high-readability "zebra stripe" pattern for printing.
+- **Dynamic Month Archiving**: Explicitly archive or unarchive targeted months. Archived months are excluded from all real-time evaluations (like conflict detection) to drastically improve Google Sheets performance.
 - **Dynamic Sync**: Add or remove roles/ministers and sync the dropdown menus across the entire schedule instantly.
 
 ## 🚀 Getting Started
@@ -21,8 +22,8 @@ A powerful, automated scheduling system built with Google Apps Script for Google
 5. Refresh your Google Sheet.
 
 ### 2. Initial Setup
-1. In your Google Sheet, find the new **⏱ Scheduler** menu.
-2. Select **⚙️ Full Setup**.
+1. In your Google Sheet, find the new **⚙️ Configs** menu.
+2. Select **⚙️ Full Setup (WARNING: DELETES ALL DATA)**.
 3. Authenticate the script when prompted.
 4. The script will generate 5 sheets: `Schedule`, `Ministers`, `Roles`, `Role Groups`, and `Settings`.
 
@@ -39,7 +40,8 @@ A powerful, automated scheduling system built with Google Apps Script for Google
 4. Go to **File ▸ Print** and set to "Fit to Width".
 
 ## 🛠 Maintenance
-- **Add Weeks**: Use **➕ Add 4 More Weeks** to extend your schedule without losing data.
+- **Add Month**: Use **➕ Add Month** to dynamically extend your schedule for the entirety of the next month (automatically calculating 4 or 5 weeks).
+- **Archive Month**: Use **📦 Archive Month...** to selectively hide past schedules, clean up your view, and instantly boost Google Sheets performance by excluding those columns from background evaluations.
 - **Sync Roles**: If you add new roles to the `Roles` sheet, use **🔄 Sync New/Removed Roles** to update the schedule layout.
 - **Refresh Dropdowns**: Use **👥 Update Minister Dropdowns** to sync the latest list of eligible ministers to each row.
 
