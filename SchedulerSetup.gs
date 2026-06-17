@@ -166,7 +166,7 @@ function onOpen() {
     .addSeparator()
     .addItem("📦 Archive Month...",           "showArchiveDialog")
     .addItem("📦 Unarchive Month...",         "showUnarchiveDialog")
-    .addItem("➕ Add 4 More Weeks",            "addMoreWeeks")
+    .addItem("➕ Add Month",                   "addMonth")
     .addItem("👥 Update Minister Dropdowns",    "refreshAllDropdowns")
     .addItem("🔄 Sync New/Removed Roles",      "syncRoles")
     .addSeparator()
@@ -951,8 +951,8 @@ function filterGroup_17() { filterByGroupIndex_(17); }
 function filterGroup_18() { filterByGroupIndex_(18); }
 function filterGroup_19() { filterByGroupIndex_(19); }
 
-// ─── ADD MORE WEEKS ─────────────────────────────────────────
-function addMoreWeeks() {
+// ─── ADD MONTH ─────────────────────────────────────────
+function addMonth() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
   if (!sheet) return;
@@ -968,7 +968,16 @@ function addMoreWeeks() {
     nextFriday = CONFIG.startFriday;
   }
 
-  const newFridays = generateFridays_(nextFriday, 4);
+  const targetMonth = nextFriday.getMonth();
+  const targetYear = nextFriday.getFullYear();
+  
+  const newFridays = [];
+  let d = new Date(nextFriday);
+  while (d.getMonth() === targetMonth && d.getFullYear() === targetYear) {
+    newFridays.push(new Date(d));
+    d.setDate(d.getDate() + 7);
+  }
+
   const numRows = sheet.getLastRow();
 
   // Add new Friday headers
@@ -1025,7 +1034,8 @@ function addMoreWeeks() {
   // Refresh dropdowns to cover new columns
   refreshAllDropdowns();
 
-  ss.toast("Added 4 more weeks ✅", "Scheduler", 3);
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  ss.toast(`Added ${monthNames[targetMonth]} ${targetYear} (${newFridays.length} weeks) ✅`, "Scheduler", 3);
 }
 
 // ─── FORMATTING ─────────────────────────────────────────────
