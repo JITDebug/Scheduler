@@ -476,8 +476,8 @@ function buildRoleGroupsSheet_(sheet) {
   }
 
   // Column widths
-  for (let c = 1; c <= groupNames.length; c++) {
-    sheet.setColumnWidth(c, 160);
+  if (groupNames.length > 0) {
+    sheet.setColumnWidths(1, groupNames.length, 160);
   }
 
   // Freeze header
@@ -545,8 +545,8 @@ function buildMinistersSheet_(sheet) {
   }
 
   // Column widths for role columns
-  for (let c = 2; c <= roles.length + 1; c++) {
-    sheet.setColumnWidth(c, 120);
+  if (roles.length > 0) {
+    sheet.setColumnWidths(2, roles.length, 120);
   }
 
   // Add instructions note
@@ -646,15 +646,14 @@ function buildScheduleSheet_(sheet) {
 
   // Column widths
   sheet.setColumnWidth(1, 160);
-  for (let c = 2; c <= fridays.length + 1; c++) {
-    sheet.setColumnWidth(c, 130);
+  if (fridays.length > 0) {
+    sheet.setColumnWidths(2, fridays.length, 130);
   }
 
   // Row heights
-  sheet.setRowHeight(1, 36); // Theme
-  sheet.setRowHeight(2, 36); // Dates
-  for (let r = 3; r <= roles.length + 2; r++) {
-    sheet.setRowHeight(r, 32);
+  sheet.setRowHeights(1, 2, 36); // Theme and Dates
+  if (roles.length > 0) {
+    sheet.setRowHeights(3, roles.length, 32);
   }
 }
 
@@ -819,15 +818,17 @@ function getGroupNames_() {
 
 /**
  * Read the roles belonging to a group (by group name) from the Role Groups sheet.
+ * @param {string} groupName - The name of the group to fetch.
+ * @param {Array<Array<any>>} [optData] - Optional pre-fetched data from the Role Groups sheet.
  */
-function getGroupRoles_(groupName) {
+function getGroupRoles_(groupName, optData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(CONFIG.roleGroupsSheetName);
   if (!sheet) {
     return CONFIG.roleGroups[groupName] || getRoles_();
   }
 
-  const data = sheet.getDataRange().getValues();
+  const data = optData || sheet.getDataRange().getValues();
   const header = data[0];
   const colIdx = header.indexOf(groupName);
   if (colIdx === -1) return getRoles_();
@@ -972,8 +973,10 @@ function addMoreWeeks() {
       .setHorizontalAlignment("center");
     sheet.getRange(1, col).setBackground("#e8f0fe")
       .setHorizontalAlignment("center").setVerticalAlignment("middle").setFontWeight("bold");
-    sheet.setColumnWidth(col, 130);
   });
+  if (newFridays.length > 0) {
+    sheet.setColumnWidths(lastCol + 1, newFridays.length, 130);
+  }
 
   // Re-merge row 1 for the dates
   const allDatesRange = sheet.getRange(2, 2, 1, sheet.getLastColumn() - 1);
@@ -1025,23 +1028,26 @@ function applyFormatting() {
   const numRows = sheet.getLastRow();
   const numCols = sheet.getLastColumn();
 
-  // Alternating row colors for readability (start at row 3)
-  for (let r = 3; r <= numRows; r++) {
-    const bg = (r % 2 !== 0) ? "#f8f9fa" : "#ffffff";
-    sheet.getRange(r, 2, 1, numCols - 1).setBackground(bg);
+  // Alternating row colors for readability and Data cells alignment
+  if (numRows >= 3 && numCols > 1) {
+    const dataRange = sheet.getRange(3, 2, numRows - 2, numCols - 1);
+    
+    // Batch set backgrounds instead of calling setBackground per row
+    const bgs = [];
+    for (let r = 3; r <= numRows; r++) {
+      const rowBg = (r % 2 !== 0) ? "#f8f9fa" : "#ffffff";
+      bgs.push(Array(numCols - 1).fill(rowBg));
+    }
+    dataRange.setBackgrounds(bgs);
+    
+    dataRange.setHorizontalAlignment("center");
+    dataRange.setVerticalAlignment("middle");
+    dataRange.setFontSize(10);
   }
 
   // Border around the entire data area
   const fullRange = sheet.getRange(1, 1, numRows, numCols);
   fullRange.setBorder(true, true, true, true, true, true, "#dadce0", SpreadsheetApp.BorderStyle.SOLID);
-
-  // Data cells alignment
-  if (numRows > 2 && numCols > 1) {
-    const dataRange = sheet.getRange(3, 2, numRows - 2, numCols - 1);
-    dataRange.setHorizontalAlignment("center");
-    dataRange.setVerticalAlignment("middle");
-    dataRange.setFontSize(10);
-  }
 
   // ── Conflict detection via conditional formatting ──
   // These rules use COUNTIF to detect when the same minister name
@@ -1085,10 +1091,15 @@ function applyFormatting() {
   }
 
   const groupNames = getGroupNames_();
+  
+  // Pre-fetch role groups data to avoid redundant API calls inside the loop
+  const roleGroupsSheet = ss.getSheetByName(CONFIG.roleGroupsSheetName);
+  const rgData = roleGroupsSheet ? roleGroupsSheet.getDataRange().getValues() : null;
+
   groupNames.forEach(gName => {
     // "All Roles" and "General Announcement" contradict specific group-based checking, skip them.
     if (gName === "All Roles" || gName === "General Announcement") return;
-    const roles = getGroupRoles_(gName);
+    const roles = getGroupRoles_(gName, rgData);
     const rows = [];
     roles.forEach(role => {
       if (roleToRow[role]) rows.push(roleToRow[role]);
@@ -1446,11 +1457,13 @@ function clearFormatting() {
     // Clear conditional format rules (removes conflict/fatigue indicators)
     sheet.clearConditionalFormatRules();
 
-    // Set background to alternating zebra stripes
+    // Set background to alternating zebra stripes using batch operation
+    const bgs = [];
     for (let r = 3; r <= numRows; r++) {
       const bg = (r % 2 !== 0) ? "#f8f9fa" : "#ffffff";
-      sheet.getRange(r, 2, 1, numCols - 1).setBackground(bg);
+      bgs.push(Array(numCols - 1).fill(bg));
     }
+    dataRange.setBackgrounds(bgs);
 
     // Ensure font color is black and not bold
     dataRange.setFontColor("#000000");
@@ -1696,11 +1709,42 @@ function generatePrintableFromRange_(srcSheet, rows, cols) {
   }
 
   // 5. Match row heights and column widths
-  for (let r = 0; r < numRows; r++) {
-    printSheet.setRowHeight(headerOffset + r, srcSheet.getRowHeight(rows[r]));
+  // Group identical row heights to batch writes
+  if (numRows > 0) {
+    let currentHeight = srcSheet.getRowHeight(rows[0]);
+    let startRow = headerOffset;
+    let count = 1;
+    for (let r = 1; r < numRows; r++) {
+      const h = srcSheet.getRowHeight(rows[r]);
+      if (h === currentHeight) {
+        count++;
+      } else {
+        printSheet.setRowHeights(startRow, count, currentHeight);
+        currentHeight = h;
+        startRow = headerOffset + r;
+        count = 1;
+      }
+    }
+    printSheet.setRowHeights(startRow, count, currentHeight);
   }
-  for (let c = 0; c < numCols; c++) {
-    printSheet.setColumnWidth(c + 1, srcSheet.getColumnWidth(cols[c]));
+
+  // Group identical column widths to batch writes
+  if (numCols > 0) {
+    let currentWidth = srcSheet.getColumnWidth(cols[0]);
+    let startCol = 1;
+    let count = 1;
+    for (let c = 1; c < numCols; c++) {
+      const w = srcSheet.getColumnWidth(cols[c]);
+      if (w === currentWidth) {
+        count++;
+      } else {
+        printSheet.setColumnWidths(startCol, count, currentWidth);
+        currentWidth = w;
+        startCol = 1 + c;
+        count = 1;
+      }
+    }
+    printSheet.setColumnWidths(startCol, count, currentWidth);
   }
 
   SpreadsheetApp.flush();
