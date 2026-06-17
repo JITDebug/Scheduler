@@ -156,23 +156,26 @@ function onOpen() {
   groupMenu.addSeparator();
   groupMenu.addItem("👁 Show All Roles", "showAllRoles");
 
-  ui.createMenu("⏱ Scheduler")
-    .addSubMenu(groupMenu)
-    .addSeparator()
-    .addItem("⚠️ Check Conflicts",            "checkConflicts")
-    .addItem("🎨 Re‑apply Formatting",        "applyFormatting")
-    .addItem("🤍 Clear Formatting",           "clearFormatting")
-    .addItem("🖨 Export for Printing",        "exportForPrinting")
-    .addSeparator()
-    .addItem("📦 Archive Month...",           "showArchiveDialog")
-    .addItem("📦 Unarchive Month...",         "showUnarchiveDialog")
-    .addItem("➕ Add Month",                   "addMonth")
-    .addItem("👥 Update Minister Dropdowns",    "refreshAllDropdowns")
-    .addItem("🔄 Sync New/Removed Roles",      "syncRoles")
-    .addSeparator()
+  ui.createMenu("⚙️ Configs")
     .addItem("🛠 Create/Repair Settings Sheet", "initializeSettingsSheet")
     .addItem("🏖 Create/Repair Vacations Sheet", "initializeVacationsSheet")
     .addItem("⚙️ Full Setup (WARNING: DELETES ALL DATA)", "setupScheduler")
+    .addToUi();
+
+  ui.createMenu("⏱ Scheduler")
+    .addSubMenu(groupMenu)
+    .addSeparator()
+    .addItem("🖨 Export for Printing",        "exportForPrinting")
+    .addItem("🤍 Clear Formatting",           "clearFormatting")
+    .addItem("🎨 Re‑apply Formatting",        "applyFormatting")
+    .addItem("⚠️ Check Conflicts",            "checkConflicts")
+    .addSeparator()
+    .addItem("➕ Add Month",                   "addMonth")
+    .addItem("📦 Archive Month...",           "showArchiveDialog")
+    .addItem("📦 Unarchive Month...",         "showUnarchiveDialog")
+    .addSeparator()
+    .addItem("👥 Update Minister Dropdowns",    "refreshAllDropdowns")
+    .addItem("🔄 Sync New/Removed Roles",      "syncRoles")
     .addToUi();
 }
 
