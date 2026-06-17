@@ -164,6 +164,8 @@ function onOpen() {
     .addItem("🤍 Clear Formatting",           "clearFormatting")
     .addItem("🖨 Export for Printing",        "exportForPrinting")
     .addSeparator()
+    .addItem("📦 Archive Month...",           "showArchiveDialog")
+    .addItem("📦 Unarchive Month...",         "showUnarchiveDialog")
     .addItem("➕ Add 4 More Weeks",            "addMoreWeeks")
     .addItem("👥 Update Minister Dropdowns",    "refreshAllDropdowns")
     .addItem("🔄 Sync New/Removed Roles",      "syncRoles")
@@ -733,9 +735,16 @@ function refreshAllDropdowns() {
   if (numCols < 2) return;
 
   const scheduleDates = [];
+  
+  // Pre-fetch hidden states
+  const isHidden = [];
+  for (let c = 1; c < numCols; c++) {
+    isHidden[c] = scheduleSheet.isColumnHiddenByUser(c + 1);
+  }
+
   for (let c = 1; c < numCols; c++) {
     const cellVal = scheduleData[1][c];
-    if (cellVal instanceof Date) {
+    if (cellVal instanceof Date && !isHidden[c]) {
       const d = new Date(cellVal);
       d.setHours(12,0,0,0);
       scheduleDates[c] = d.getTime();
@@ -1054,27 +1063,55 @@ function applyFormatting() {
   // appears multiple times in the same column (same Friday).
   // Rules are ordered by priority: highest severity first.
 
-  const dataRange = sheet.getRange(3, 2, numRows - 2, numCols - 1);
+  function getColLetter(col) {
+    let temp, letter = '';
+    while (col > 0) {
+      temp = (col - 1) % 26;
+      letter = String.fromCharCode(temp + 65) + letter;
+      col = (col - temp - 1) / 26;
+    }
+    return letter;
+  }
 
-  const isConf3 = 'COUNTIF(B$3:B$' + numRows + ',B3)>=3';
-  const isConf2 = 'COUNTIF(B$3:B$' + numRows + ',B3)>=2';
+  const visibleCols = [];
+  const baseA1s = [];
+  for (let c = 2; c <= numCols; c++) {
+    if (!sheet.isColumnHiddenByUser(c)) {
+      const letter = getColLetter(c);
+      visibleCols.push(letter);
+      baseA1s.push(`${letter}3:${letter}${numRows}`);
+    }
+  }
+
+  if (visibleCols.length === 0) {
+    sheet.clearConditionalFormatRules();
+    ss.toast("Formatting applied (all weeks archived) ✅", "Scheduler", 3);
+    return;
+  }
+
+  const baseRanges = sheet.getRangeList(baseA1s).getRanges();
+  const fCol = visibleCols[0];
+  const refCell = fCol + "3";
+
+  const isConf3 = `COUNTIF(${fCol}$3:${fCol}$${numRows},${refCell})>=3`;
+  const isConf2 = `COUNTIF(${fCol}$3:${fCol}$${numRows},${refCell})>=2`;
 
   // Base general rules
   const conf3Rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(B3<>"", ' + isConf3 + ')')
-    .setBackground("#ffcdd2").setFontColor("#000000").setBold(false).setRanges([dataRange]).build();
+    .whenFormulaSatisfied(`=AND(${refCell}<>"", ${isConf3})`)
+    .setBackground("#ffcdd2").setFontColor("#000000").setBold(false).setRanges(baseRanges).build();
 
   const conf2Rule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(B3<>"", ' + isConf2 + ')')
-    .setBackground("#ffe0b2").setFontColor("#000000").setBold(false).setRanges([dataRange]).build();
+    .whenFormulaSatisfied(`=AND(${refCell}<>"", ${isConf2})`)
+    .setBackground("#ffe0b2").setFontColor("#000000").setBold(false).setRanges(baseRanges).build();
 
   const filledRule = SpreadsheetApp.newConditionalFormatRule()
     .whenCellNotEmpty()
-    .setBackground("#c8e6c9").setFontColor("#000000").setBold(false).setRanges([dataRange]).build();
+    .setBackground("#c8e6c9").setFontColor("#000000").setBold(false).setRanges(baseRanges).build();
 
   const emptyRule = SpreadsheetApp.newConditionalFormatRule()
     .whenCellEmpty()
-    .setBackground("#fff9c4").setRanges([dataRange]).build();
+    .setBackground("#fff9c4").setRanges(baseRanges).build();
 
   // Dynamic Fatigue Warning rules per Role Group
   const rulesConf3Consec = [];
@@ -1107,8 +1144,14 @@ function applyFormatting() {
 
     if (rows.length === 0) return;
 
-    const topLeftCell = "B" + rows[0];
-    const ranges = rows.map(r => sheet.getRange(r, 2, 1, numCols - 1));
+    const groupA1s = [];
+    rows.forEach(r => {
+      visibleCols.forEach(letter => {
+        groupA1s.push(`${letter}${r}`);
+      });
+    });
+    const ranges = sheet.getRangeList(groupA1s).getRanges();
+    const topLeftCell = fCol + rows[0];
 
     const fLeft2 = "IF(COLUMN()>3, OR(" + rows.map(r => `INDEX($A$1:$ZZ, ${r}, COLUMN()-2)=${topLeftCell}`).join(",") + "), FALSE)";
     const fLeft1 = "IF(COLUMN()>2, OR(" + rows.map(r => `INDEX($A$1:$ZZ, ${r}, COLUMN()-1)=${topLeftCell}`).join(",") + "), FALSE)";
@@ -1116,8 +1159,8 @@ function applyFormatting() {
     const fRight2 = "OR(" + rows.map(r => `INDEX($A$1:$ZZ, ${r}, COLUMN()+2)=${topLeftCell}`).join(",") + ")";
     const isConsecutive = `OR(AND(${fLeft2},${fLeft1}), AND(${fLeft1},${fRight1}), AND(${fRight1},${fRight2}))`;
 
-    const gConf3 = `COUNTIF(B$3:B$${numRows},${topLeftCell})>=3`;
-    const gConf2 = `COUNTIF(B$3:B$${numRows},${topLeftCell})>=2`;
+    const gConf3 = `COUNTIF(${fCol}$3:${fCol}$${numRows},${topLeftCell})>=3`;
+    const gConf2 = `COUNTIF(${fCol}$3:${fCol}$${numRows},${topLeftCell})>=2`;
 
     rulesConf3Consec.push(
       SpreadsheetApp.newConditionalFormatRule()
@@ -1169,6 +1212,187 @@ function onEditTrigger(e) {
   }
 }
 
+// ─── ARCHIVE / UNARCHIVE DIALOG ──────────────────────────────
+function showArchiveDialog() { showActionDialog_('archive'); }
+function showUnarchiveDialog() { showActionDialog_('unarchive'); }
+
+function showActionDialog_(action) {
+  const result = getAllScheduleMonths_();
+  if (result.error) {
+    SpreadsheetApp.getUi().alert(result.error);
+    return;
+  }
+  
+  const validMonths = result.months.filter(m => action === 'archive' ? m.visibleCount > 0 : m.hiddenCount > 0);
+
+  if (validMonths.length === 0) {
+    const msg = action === 'archive' ? "There are no visible months left to archive." : "There are no archived months to unarchive.";
+    SpreadsheetApp.getUi().alert(msg);
+    return;
+  }
+
+  const optionsHtml = validMonths.map((opt) =>
+    '<option value="' + opt.month + '_' + opt.year + '">' + opt.label + '</option>'
+  ).join('');
+
+  const title = action === 'archive' ? "Archive Month" : "Unarchive Month";
+  const btnText = action === 'archive' ? "Archive" : "Unarchive";
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0; padding: 24px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          background-color: #ffffff; color: #3c4043;
+          overflow: hidden;
+        }
+        .label { font-size: 14px; font-weight: 500; margin-bottom: 12px; display: block; }
+        select {
+          width: 100%; height: 40px; padding: 0 12px; border-radius: 4px; border: 1px solid #dadce0;
+          font-size: 14px; background-color: #fff; outline: none; transition: border 0.2s;
+          cursor: pointer; -webkit-appearance: none; -moz-appearance: none; margin-bottom: 24px;
+        }
+        select:focus { border: 2px solid #1a73e8; }
+        .buttons { display: flex; justify-content: flex-end; gap: 12px; margin-top: 12px; }
+        button {
+          height: 36px; padding: 0 20px; border-radius: 4px; font-size: 14px; font-weight: 500;
+          cursor: pointer; border: 1px solid transparent; transition: background 0.2s;
+        }
+        .btn-action { background-color: #1a73e8; color: #ffffff; }
+        .btn-action:hover { background-color: #1b66c9; }
+        .btn-action:disabled { opacity: 0.6; cursor: not-allowed; }
+      </style>
+    </head>
+    <body>
+      <label class="label" for="monthSelect">Select Month to ${btnText}:</label>
+      <select id="monthSelect">
+        ${optionsHtml}
+      </select>
+      <div class="buttons">
+        <button id="btnAction" class="btn-action" onclick="doAction()">${btnText}</button>
+      </div>
+
+      <script>
+        function doAction() {
+          document.getElementById('btnAction').disabled = true;
+          document.getElementById('btnAction').textContent = 'Working...';
+          const val = document.getElementById('monthSelect').value;
+          const parts = val.split('_');
+          const month = parseInt(parts[0]);
+          const year = parseInt(parts[1]);
+          google.script.run
+            .withSuccessHandler(() => google.script.host.close())
+            .withFailureHandler((err) => { alert(err.message); google.script.host.close(); })
+            .runArchiveActionByVal(month, year, '${action}');
+        }
+      </script>
+    </body>
+    </html>
+  `;
+  
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(340).setHeight(180),
+    title
+  );
+}
+
+function runArchiveActionByVal(month, year, action) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
+  
+  const lastCol = sheet.getLastColumn();
+  const dateHeaderRow = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
+
+  let startCol = -1;
+  let count = 0;
+  let modifiedCount = 0;
+
+  for (let i = 0; i < dateHeaderRow.length; i++) {
+    const d = dateHeaderRow[i];
+    let isTarget = false;
+    
+    if (d instanceof Date && d.getMonth() === month && d.getFullYear() === year) {
+      if (action === 'archive' && !sheet.isColumnHiddenByUser(i + 2)) isTarget = true;
+      if (action === 'unarchive' && sheet.isColumnHiddenByUser(i + 2)) isTarget = true;
+    }
+
+    if (isTarget) {
+      if (startCol === -1) startCol = i + 2;
+      count++;
+    } else {
+      if (startCol !== -1) {
+        if (action === 'archive') sheet.hideColumns(startCol, count);
+        else sheet.showColumns(startCol, count);
+        modifiedCount += count;
+        startCol = -1;
+        count = 0;
+      }
+    }
+  }
+
+  if (startCol !== -1) {
+    if (action === 'archive') sheet.hideColumns(startCol, count);
+    else sheet.showColumns(startCol, count);
+    modifiedCount += count;
+  }
+
+  const actStr = action === 'archive' ? 'Archived' : 'Unarchived';
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const label = monthNames[month] + " " + year;
+
+  if (modifiedCount > 0) {
+    ss.toast(`${actStr} ${modifiedCount} week(s) for ${label} ✅`, "Scheduler", 4);
+  } else {
+    ss.toast(`Nothing to change for ${label}.`, "Scheduler", 4);
+  }
+}
+
+/**
+ * Get all months from the schedule, tracking their hidden vs visible status.
+ */
+function getAllScheduleMonths_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.schedulerSheetName);
+  if (!sheet) return { months: [], error: "Schedule sheet not found." };
+
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 2) return { months: [], error: "No dates found." };
+
+  const dateHeaderRow = sheet.getRange(2, 2, 1, lastCol - 1).getValues()[0];
+  const monthNames = ["January", "February", "March", "April", "May", "June",
+                      "July", "August", "September", "October", "November", "December"];
+
+  // Pre-fetch hidden states
+  const isHidden = [];
+  for (let i = 0; i < dateHeaderRow.length; i++) {
+    isHidden[i] = sheet.isColumnHiddenByUser(i + 2);
+  }
+
+  const monthMap = new Map();
+
+  for (let i = 0; i < dateHeaderRow.length; i++) {
+    const d = dateHeaderRow[i];
+    if (d instanceof Date) {
+      const label = monthNames[d.getMonth()] + " " + d.getFullYear();
+      if (!monthMap.has(label)) {
+        monthMap.set(label, { label: label, month: d.getMonth(), year: d.getFullYear(), visibleCount: 0, hiddenCount: 0 });
+      }
+      if (isHidden[i]) {
+        monthMap.get(label).hiddenCount++;
+      } else {
+        monthMap.get(label).visibleCount++;
+      }
+    }
+  }
+  
+  return { months: Array.from(monthMap.values()), error: null };
+}
+
 // ─── REUSABLE MONTH RANGE HELPERS ───────────────────────────
 // Shared utilities for any feature that needs a 2-month range picker.
 // Reads ONLY the date header row (row 2) — not the entire sheet — for speed.
@@ -1191,10 +1415,19 @@ function getScheduleMonthPairs_() {
   const monthNames = ["January", "February", "March", "April", "May", "June",
                       "July", "August", "September", "October", "November", "December"];
 
-  // Extract unique Month-Year labels
+  // Extract unique Month-Year labels, ignoring hidden columns
   const months = [];
   const seen = new Set();
+
+  // Pre-fetch hidden states
+  const isHidden = [];
   for (let i = 0; i < dateHeaderRow.length; i++) {
+    isHidden[i] = sheet.isColumnHiddenByUser(i + 2);
+  }
+
+  for (let i = 0; i < dateHeaderRow.length; i++) {
+    if (isHidden[i]) continue; // Skip archived columns
+
     const d = dateHeaderRow[i];
     if (d instanceof Date) {
       const label = monthNames[d.getMonth()] + " " + d.getFullYear();
@@ -1360,7 +1593,15 @@ function runConflictCheck(pairedIndex) {
   const numRows = data.length;
   const numCols = data[0].length;
 
+  // Pre-calculate which columns are hidden
+  const isHidden = [];
   for (let c = 1; c < numCols; c++) {
+    isHidden[c] = sheet.isColumnHiddenByUser(c + 1);
+  }
+
+  for (let c = 1; c < numCols; c++) {
+    if (isHidden[c]) continue; // Ignore archived/hidden weeks
+
     const dateHeader = data[1][c];
 
     // Filtering logic — skip columns outside the chosen 2-month range
@@ -1508,7 +1749,16 @@ function runPrintRange(pairedIndex) {
 
   // Determine which columns (dates) fall within the chosen range
   const colIndices = []; // 1-based column indices on the sheet
+  
+  // Pre-fetch hidden states
+  const isHidden = [];
   for (let i = 0; i < dateHeaderRow.length; i++) {
+    isHidden[i] = sheet.isColumnHiddenByUser(i + 2);
+  }
+
+  for (let i = 0; i < dateHeaderRow.length; i++) {
+    if (isHidden[i]) continue; // Ignore archived weeks
+
     const d = dateHeaderRow[i];
     if (d instanceof Date) {
       const m = d.getMonth();
